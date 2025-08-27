@@ -111,11 +111,6 @@ x-casaos:
   architectures: [amd64, arm64]
   author: Yundera Team
   developer: Nextcloud GmbH
-  pre-install-cmd: |
-    rm -rf /DATA/AppData/$AppID/* &&
-    mkdir -p /DATA/AppData/$AppID/{config,data,html,db,redis} &&
-    chown -R $PUID:$PGID /DATA/AppData/$AppID &&
-    chmod -R 755 /DATA/AppData/$AppID
   title:
     en_us: Nextcloud
     ko_kr: Nextcloud
@@ -262,3 +257,7 @@ x-casaos:
         
         **파일 동기화 위치:** /DATA/Documents & /DATA/Media
   index: /
+  pre-install-cmd: |
+    mkdir -p /DATA/AppData/$AppID/{config,data,html,db,redis} &&
+    chown -R $PUID:$PGID /DATA/AppData/$AppID &&
+    chmod -R 755 /DATA/AppData/$AppID
