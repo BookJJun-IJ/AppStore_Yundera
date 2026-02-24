@@ -2,7 +2,7 @@ name: psitransfer
 
 services:
   psitransfer:
-    image: psitrax/psitransfer:v2.4.0
+    image: psitrax/psitransfer:v2.4.1
     container_name: psitransfer
     user: 0:0
     restart: unless-stopped
