@@ -79,22 +79,67 @@ x-casaos:
   title:
     en_us: Docusaurus
   tagline:
-    en_us: Build beautiful documentation websites
-    fr_fr: Creez de beaux sites de documentation
-    ko_kr: 아름다운 문서 웹사이트를 만드세요
+    en_us: SEO-ready documentation with FAQ rich results and geo-targeting
+    fr_fr: Documentation optimisee SEO avec FAQ enrichies et ciblage geographique
+    ko_kr: FAQ 리치 결과와 지역 타겟팅을 지원하는 SEO 최적화 문서 사이트
   description:
     en_us: |
-      Docusaurus is a static site generator by Meta. Build documentation
-      websites with Markdown, versioning, i18n, and search built in.
-      Perfect for project docs, knowledge bases, and blogs.
+      Docusaurus is a static site generator by Meta, optimized for SEO, FAQ rich results, and geo-targeting.
+
+      **SEO Features:**
+      - Schema.org structured data (Organization, WebSite, FAQPage)
+      - Automatic sitemap and robots.txt generation
+      - Open Graph and Twitter Card meta tags
+      - Per-page SEO with frontmatter (title, description, keywords)
+
+      **FAQ Rich Results:**
+      - FAQPage JSON-LD schema for Google FAQ dropdowns
+      - Questions appear directly in search results
+
+      **Geo & i18n:**
+      - Geo meta tags for regional search targeting
+      - Built-in multi-language support with hreflang tags
+      - Locale-specific URLs and sitemaps
+
+      Also includes Markdown authoring, versioning, search, and dark mode.
     fr_fr: |
-      Docusaurus est un generateur de sites statiques par Meta. Creez des sites
-      de documentation avec Markdown, versionnage, i18n et recherche integres.
-      Ideal pour la documentation de projets, les bases de connaissances et les blogs.
+      Docusaurus est un generateur de sites statiques par Meta, optimise pour le SEO, les resultats enrichis FAQ et le ciblage geographique.
+
+      **Fonctionnalites SEO :**
+      - Donnees structurees Schema.org (Organization, WebSite, FAQPage)
+      - Generation automatique de sitemap et robots.txt
+      - Balises meta Open Graph et Twitter Card
+      - SEO par page avec frontmatter (titre, description, mots-cles)
+
+      **Resultats enrichis FAQ :**
+      - Schema JSON-LD FAQPage pour les menus deroulants FAQ Google
+      - Les questions apparaissent directement dans les resultats de recherche
+
+      **Geo & i18n :**
+      - Balises meta geo pour le ciblage regional
+      - Support multilingue integre avec balises hreflang
+      - URLs et sitemaps par langue
+
+      Inclut egalement la redaction en Markdown, le versionnage, la recherche et le mode sombre.
     ko_kr: |
-      Docusaurus는 Meta에서 만든 정적 사이트 생성기입니다. Markdown, 버전 관리,
-      다국어 지원, 검색 기능이 내장된 문서 웹사이트를 만들 수 있습니다.
-      프로젝트 문서, 지식 베이스, 블로그에 적합합니다.
+      Docusaurus는 Meta에서 만든 정적 사이트 생성기로, SEO, FAQ 리치 결과, 지역 타겟팅에 최적화되어 있습니다.
+
+      **SEO 기능:**
+      - Schema.org 구조화 데이터 (Organization, WebSite, FAQPage)
+      - 자동 sitemap 및 robots.txt 생성
+      - Open Graph 및 Twitter Card 메타 태그
+      - 프론트매터를 통한 페이지별 SEO (제목, 설명, 키워드)
+
+      **FAQ 리치 결과:**
+      - Google FAQ 드롭다운을 위한 FAQPage JSON-LD 스키마
+      - 검색 결과에 질문이 직접 표시됨
+
+      **Geo & 다국어:**
+      - 지역 검색 타겟팅을 위한 Geo 메타 태그
+      - hreflang 태그를 포함한 내장 다국어 지원
+      - 언어별 URL 및 사이트맵
+
+      Markdown 작성, 버전 관리, 검색, 다크 모드도 지원합니다.
   tips:
     before_install:
       en_us: |
