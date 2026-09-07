@@ -262,12 +262,19 @@ x-casaos:
         **First-Time Setup**
 
         1. **Access the Web UI**: Click the app icon on your dashboard and sign in with your Yundera account (single sign-on)
-        2. **Configure API Key**: Add your Anthropic or OpenAI API key in the Config section
-        3. **Start chatting**: Use the built-in WebChat or connect messaging platforms
+        2. **Unlock the gateway**: if the Control UI asks for a gateway token or password, paste `$APP_DEFAULT_PASSWORD`
+        3. **Configure API Key**: Add your Anthropic or OpenAI API key in the Config section
+        4. **Start chatting**: Use the built-in WebChat or connect messaging platforms
 
         **Messaging Integrations:**
 
         OpenClaw supports WhatsApp, Telegram, Discord, Slack, Signal, and more. Configure through the Web UI after setup.
+
+        **Already installed from an earlier version?**
+
+        The gateway only accepts browser origins listed in its own config file, and that file is never overwritten once it exists - so an existing install keeps the old one. If the Web UI reports `Browser origin not allowed`, edit `/DATA/AppData/openclaw/openclaw.json`, add the block below inside `gateway.controlUi`, and restart the app:
+
+        `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]`
 
         **Documentation:** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
       fr_fr: |
@@ -283,7 +290,12 @@ x-casaos:
         **Configuration initiale**
 
         1. **Acceder a l'interface Web** : Cliquez sur l'icone de l'app et connectez-vous avec votre compte Yundera (authentification unique)
-        2. **Configurer la cle API** : Ajoutez votre cle API dans la section Config
+        2. **Deverrouiller la passerelle** : si l'interface demande un token ou un mot de passe, collez `$APP_DEFAULT_PASSWORD`
+        3. **Configurer la cle API** : Ajoutez votre cle API dans la section Config
+
+        **Deja installe depuis une version anterieure ?**
+
+        Le fichier de configuration existant n'est jamais ecrase. Si l'interface affiche `Browser origin not allowed`, ajoutez `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]` dans `gateway.controlUi` de `/DATA/AppData/openclaw/openclaw.json`, puis redemarrez l'app.
 
         **Documentation :** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
       de_de: |
@@ -299,7 +311,12 @@ x-casaos:
         **Ersteinrichtung**
 
         1. **Web-UI aufrufen**: Klicken Sie auf das App-Symbol und melden Sie sich mit Ihrem Yundera-Konto an (Single Sign-on)
-        2. **API-Schlussel konfigurieren**: Fugen Sie Ihren API-Schlussel im Config-Bereich hinzu
+        2. **Gateway entsperren**: Fragt die Control UI nach einem Token oder Passwort, fugen Sie `$APP_DEFAULT_PASSWORD` ein
+        3. **API-Schlussel konfigurieren**: Fugen Sie Ihren API-Schlussel im Config-Bereich hinzu
+
+        **Bereits aus einer fruheren Version installiert?**
+
+        Die vorhandene Konfigurationsdatei wird nie uberschrieben. Meldet die Web-UI `Browser origin not allowed`, erganzen Sie in `/DATA/AppData/openclaw/openclaw.json` unter `gateway.controlUi` den Eintrag `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]` und starten Sie die App neu.
 
         **Dokumentation:** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
       es_es: |
@@ -315,7 +332,12 @@ x-casaos:
         **Configuracion inicial**
 
         1. **Acceder a la interfaz Web**: Haz clic en el icono de la app e inicia sesion con tu cuenta Yundera (inicio de sesion unico)
-        2. **Configurar clave API**: Agrega tu clave API en la seccion Config
+        2. **Desbloquear el gateway**: si la interfaz pide un token o contrasena, pega `$APP_DEFAULT_PASSWORD`
+        3. **Configurar clave API**: Agrega tu clave API en la seccion Config
+
+        **Ya instalado desde una version anterior?**
+
+        El archivo de configuracion existente nunca se sobrescribe. Si la interfaz muestra `Browser origin not allowed`, anade `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]` dentro de `gateway.controlUi` en `/DATA/AppData/openclaw/openclaw.json` y reinicia la app.
 
         **Documentacion:** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
       zh_cn: |
@@ -331,7 +353,12 @@ x-casaos:
         **首次设置**
 
         1. **访问Web界面**：点击应用图标，使用您的 Yundera 账户登录（单点登录）
-        2. **配置API密钥**：在Config部分添加您的API密钥
+        2. **解锁网关**：如果控制界面要求输入网关令牌或密码，请粘贴 `$APP_DEFAULT_PASSWORD`
+        3. **配置API密钥**：在Config部分添加您的API密钥
+
+        **从旧版本升级？**
+
+        已存在的配置文件不会被覆盖。如果界面提示 `Browser origin not allowed`，请在 `/DATA/AppData/openclaw/openclaw.json` 的 `gateway.controlUi` 中加入 `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]`，然后重启应用。
 
         **文档：** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
       ko_kr: |
@@ -347,7 +374,12 @@ x-casaos:
         **최초 설정**
 
         1. **웹 UI 접속**: 앱 아이콘을 클릭하고 Yundera 계정으로 로그인 (통합 인증)
-        2. **API 키 구성**: Config 섹션에서 API 키 추가
+        2. **게이트웨이 잠금 해제**: 컨트롤 UI가 게이트웨이 토큰이나 비밀번호를 요구하면 `$APP_DEFAULT_PASSWORD` 를 붙여넣으세요
+        3. **API 키 구성**: Config 섹션에서 API 키 추가
+
+        **이전 버전에서 이미 설치했나요?**
+
+        기존 설정 파일은 덮어쓰지 않습니다. 웹 UI에 `Browser origin not allowed` 가 표시되면 `/DATA/AppData/openclaw/openclaw.json` 의 `gateway.controlUi` 안에 `"allowedOrigins": ["https://openclaw-$APP_DOMAIN", "https://openclaw-$APP_PUBLIC_IP_DASH.nip.io", "https://openclaw-$APP_PUBLIC_IP_DASH.sslip.io"]` 를 추가하고 앱을 재시작하세요.
 
         **문서:** [https://docs.openclaw.ai/](https://docs.openclaw.ai/)
   index: /
@@ -369,9 +401,17 @@ x-compose-app:
   # create-if-absent on every up, so a reinstall or a version upgrade never
   # overwrites what the gateway or the user wrote, and Maison chowns it to
   # $PUID:$PGID so the gateway can rewrite its own config.
+  #
+  # `.tmpl` because gateway.controlUi.allowedOrigins has to name this install's own
+  # published origins. The gateway checks the browser Origin on every Control UI
+  # websocket connect and rejects anything not on that list ("Browser origin not
+  # allowed"), which made the whole UI — /chat, /webchat, /control, /overview,
+  # /config — unusable on the hostnames this store publishes. There is no
+  # environment variable for it: the image reads the list from this file only.
+  # The three entries mirror the caddy_0/1/2 labels above; keep them in step.
   files:
     - path: /DATA/AppData/openclaw/openclaw.json
-      from: openclaw.json
+      from: openclaw.json.tmpl
       ensure: once
       mode: "0644"
   webui-host: openclaw-${domain}

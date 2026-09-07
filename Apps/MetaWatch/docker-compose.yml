@@ -47,6 +47,19 @@ services:
       BACKEND_HOST: "metawatch-app"
       BACKEND_PORT: "3000"
       LISTEN_PORT: "80"
+      # The service-worker script and its two static imports, exempted from the
+      # SSO gate. register() fetches the worker script WITHOUT the session
+      # cookie, so behind the gate it 302s to /nhl-auth/oidc/login — and by spec
+      # "the script resource is behind a redirect" is a fatal SecurityError, so
+      # no worker ever installs and the whole offline/OPFS tier is dead. These
+      # three are static app JS (same class as FileBrowser's `static/`); nothing
+      # else needs it, because once installed the worker's own fetches DO carry
+      # the cookie. Matching is per-segment, so `sw.js` exempts /sw.js only, not
+      # /sw.js.map, and the app's own /api/ second gate stays fully gated. A
+      # documented deviation from "use OAUTH_RESOURCE, not ALLOWED_PATHS" —
+      # OAUTH_RESOURCE gates on Bearer tokens, which a service-worker script
+      # fetch cannot present. See rationale.md.
+      ALLOWED_PATHS: "sw.js,js/downloads/cache.js,js/downloads/opfs.js"
       # Presence of OIDC_REGISTRAR_URL enables OIDC (Authelia SSO) mode.
       OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
       REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"

@@ -7,10 +7,17 @@ have to agree:
 
 - `openclaw-backend` sets
   `OPENCLAW_GATEWAY_CONTROL_UI_ALLOW_INSECURE_AUTH: "true"` and
-  `OPENCLAW_GATEWAY_CONTROL_UI_DANGEROUSLY_DISABLE_DEVICE_AUTH: "true"`.
-- `seed/openclaw.json` — the live gateway config — carries the same two flags
+  `OPENCLAW_GATEWAY_CONTROL_UI_DANGEROUSLY_DISABLE_DEVICE_AUTH: "true"`. These are
+  documentation of intent more than mechanism — the `2026.6.9` runtime reads no
+  `OPENCLAW_GATEWAY_CONTROL_UI_*` variable, so the config file below is the authority.
+- `seed/openclaw.json.tmpl` — the live gateway config — carries the same two flags
   (`allowInsecureAuth`, `dangerouslyDisableDeviceAuth`) so the setting survives the
   gateway rewriting its own config file.
+
+The same file also pins **`gateway.controlUi.allowedOrigins`** to this install's three
+published origins. That is not a deviation, it is the upstream-documented hardened
+setting — it is recorded here because it is the one value that has to be templated per
+install, and because a `["*"]` shortcut was considered and rejected (below).
 
 The gateway is additionally started with `--allow-unconfigured`, so it serves before
 an AI provider key has been entered.
@@ -35,6 +42,19 @@ credential — the user's PCS account — governing access.
 entered through the Config section of the UI (as `tips.before_install` describes)
 rather than requiring the user to edit the environment and redeploy before the app
 will start at all.
+
+**`allowedOrigins` is what makes that first open work at all.** The gateway validates
+the browser `Origin` on every Control UI websocket connect, and on a non-loopback bind
+it seeds the allowlist with `http://localhost:<port>` / `http://127.0.0.1:<port>` only.
+A browser arriving on the app's own public hostname is therefore rejected with
+`Browser origin not allowed` before any credential is looked at — every Control UI
+route (`/chat`, `/webchat`, `/control`, `/overview`, `/config`) shows the same error,
+and the UI's own remedy text tells the user to run `openclaw gateway run` on a host
+shell. There is no environment variable for this: the image resolves the list from
+`gateway.controlUi.allowedOrigins` in the config file only (verified against the
+`2026.6.9` image — `OPENCLAW_GATEWAY_CONTROL_UI_*` names do not appear in its runtime
+at all), so the value has to be seeded, and because it embeds the deployment's domain
+it has to be a `.tmpl`. The three entries mirror the `caddy_0/1/2` labels.
 
 ## Security mitigations in place
 
@@ -63,10 +83,22 @@ will start at all.
 - **`init: true`** on the backend reaps the processes its shell tool spawns, so a
   long-lived gateway does not accumulate zombies.
 - **Memory ceilings and CPU shares** on both services (256M / 2048M; 50 / 90).
-- **Pinned images**, no `:latest`: `ghcr.io/yundera/appshield:2.0.9` and
+- **Pinned images**, no `:latest`: `ghcr.io/yundera/appshield:3.0.2` and
   `alpine/openclaw:2026.6.9`.
 
 ## Alternatives considered and rejected
+
+0. **`gateway.controlUi.allowedOrigins: ["*"]`.** It works — the origin check reads
+   `allowlist.has("*")` and accepts any browser origin — and it would need no
+   templating and would survive a later domain change. Rejected anyway. Upstream's own
+   documentation says not to use it outside tightly controlled local testing, the
+   image's `openclaw security audit` raises a finding for it, and the exposure is real
+   rather than theoretical here: allow-all origins is what turns a
+   cross-site-websocket-hijacking attempt into a working one, and the thing on the
+   other end of that websocket executes shell commands. AppShield's SSO cookie is the
+   only thing that would stand in the way, and a config value should not be leaning on
+   another component's cookie policy. The explicit three-origin list costs one `.tmpl`
+   and gives up nothing the app actually publishes.
 
 1. **Leave OpenClaw's device auth enabled behind AppShield.** Rejected — two login
    ceremonies for one app, and the pairing-approval UI sits behind the proxy that is
@@ -89,6 +121,15 @@ will start at all.
   is create-if-absent on every up. A reinstall or a version upgrade therefore never
   overwrites the config the user — or the gateway itself — has since written, and
   Maison chowns it to `$PUID:$PGID` so the gateway can rewrite its own config.
+- **The `ensure: once` / `allowedOrigins` trade-off is deliberate.** `ensure: always`
+  would re-render the origin list on every up and keep it correct through a domain
+  change — but this file is also where the gateway stores the AI provider API key the
+  user types into the Config section, so `always` would wipe that key on the next
+  start. Preserving user data wins: the seeded origin list reaches every fresh install,
+  and an install made before this change keeps its old file. `tips.before_install`
+  therefore tells an existing user exactly which three entries to add to
+  `/DATA/AppData/openclaw/openclaw.json` by hand, and the same note covers the rarer
+  case of a PCS whose domain changed after install.
 - `/DATA/AppData/openclaw` is declared under `x-compose-app.folders` owned by
   `$PUID:$PGID`, created before any image is pulled, so the gateway can write its
   own state on first start without a hook.

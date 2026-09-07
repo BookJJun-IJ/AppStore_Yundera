@@ -8,15 +8,54 @@ services:
     restart: unless-stopped
     expose:
       - 80
+    # The dashboard tile links here from another host, so the browser sends
+    # `Referer: https://<dashboard>/` on that first navigation. qBittorrent's
+    # cross-site check (WebApplication::doProcessRequest) answers 401
+    # "Unauthorized" — not the login page — whenever CSRF protection is on, the
+    # request still needs authentication, and the Referer/Origin host differs from
+    # the served host. Chrome replays the referrer on reload, so the tile is a dead
+    # end until the URL is retyped by hand.
+    #
+    # Fix: drop Referer and Origin for exactly the request the tile issues — GET,
+    # path "/", Sec-Fetch-Mode: navigate — and for nothing else. A cross-site GET
+    # of "/" changes nothing and the attacker cannot read the response, so nothing
+    # is given up here; every mutating request is an XHR to /api/v2/* with
+    # Sec-Fetch-Mode: cors, does not match @tilenav, keeps its Origin, and stays
+    # covered by qBittorrent's own check. Stripping the two headers globally would
+    # instead be equivalent to turning CSRF protection back off. See rationale.md.
     labels:
       caddy_0: qbittorrent-${APP_DOMAIN}
       caddy_0.import: gateway_tls
-      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_0.@tilenav.method: GET
+      caddy_0.@tilenav.path: "/"
+      caddy_0.@tilenav.header: "Sec-Fetch-Mode navigate"
+      caddy_0.0_handle: "@tilenav"
+      caddy_0.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_0.0_handle.reverse_proxy.0_header_up: "-Referer"
+      caddy_0.0_handle.reverse_proxy.1_header_up: "-Origin"
+      caddy_0.1_handle: ""
+      caddy_0.1_handle.reverse_proxy: "{{upstreams 80}}"
       caddy_1: qbittorrent-${APP_PUBLIC_IP_DASH}.nip.io
       caddy_1.import: gateway_tls
-      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_1.@tilenav.method: GET
+      caddy_1.@tilenav.path: "/"
+      caddy_1.@tilenav.header: "Sec-Fetch-Mode navigate"
+      caddy_1.0_handle: "@tilenav"
+      caddy_1.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_1.0_handle.reverse_proxy.0_header_up: "-Referer"
+      caddy_1.0_handle.reverse_proxy.1_header_up: "-Origin"
+      caddy_1.1_handle: ""
+      caddy_1.1_handle.reverse_proxy: "{{upstreams 80}}"
       caddy_2: qbittorrent-${APP_PUBLIC_IP_DASH}.sslip.io
-      caddy_2.reverse_proxy: "{{upstreams 80}}"
+      caddy_2.@tilenav.method: GET
+      caddy_2.@tilenav.path: "/"
+      caddy_2.@tilenav.header: "Sec-Fetch-Mode navigate"
+      caddy_2.0_handle: "@tilenav"
+      caddy_2.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_2.0_handle.reverse_proxy.0_header_up: "-Referer"
+      caddy_2.0_handle.reverse_proxy.1_header_up: "-Origin"
+      caddy_2.1_handle: ""
+      caddy_2.1_handle.reverse_proxy: "{{upstreams 80}}"
     networks:
       - pcs
     # Uncomment the ports section if you want to expose the service on specific ports
@@ -118,13 +157,22 @@ x-compose-app:
       # preference the user had changed.
       when: absent:/DATA/AppData/qbittorrent/config/qBittorrent/qBittorrent.conf
     # The seeder image writes `WebUI\CSRFProtection=false` unconditionally and
-    # offers no switch for it. qBittorrent's Origin/Referer check compares host
-    # and port only (scheme is explicitly not compared) and honours
-    # X-Forwarded-Host, so it is satisfied by the Caddy routes as shipped — the
-    # flag is not a reverse-proxy workaround, and off it leaves a cross-site POST
-    # to /api/v2/app/setPreferences (which can set autorun_program) with nothing
-    # but the browser's SameSite default in front of it. Turn it back on once,
-    # then leave the user's preferences alone.
+    # offers no switch for it. Off, it leaves a cross-site POST to
+    # /api/v2/app/setPreferences (which can set autorun_program, i.e. arbitrary
+    # command execution on the host container) with nothing but the browser's
+    # SameSite default in front of it, so it is turned back on here — once, then
+    # the user's preferences are left alone.
+    #
+    # What the check costs. qBittorrent compares host and port only (scheme is
+    # explicitly not compared) and honours X-Forwarded-Host, so every same-origin
+    # request the WebUI itself makes is satisfied by the Caddy routes as shipped —
+    # the flag is not a reverse-proxy workaround. What it also rejects, and what
+    # the earlier version of this comment did not account for, is the *cross-site
+    # navigation* from the Maison dashboard: with authentication still needed and a
+    # foreign Referer/Origin, the tile's GET / gets a 401 text/plain body instead of
+    # the login page. That single entry request — and only it — is unpicked at the
+    # proxy by the @tilenav handler in the Caddy labels above; cross-site mutating
+    # requests still carry their Origin and are still rejected here.
     - name: enable-csrf-protection
       image: busybox:1.37.0
       user: $PUID:$PGID

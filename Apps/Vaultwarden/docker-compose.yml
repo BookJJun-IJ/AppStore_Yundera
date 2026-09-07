@@ -1,23 +1,38 @@
 name: vaultwarden
 
 services:
+  # AppShield is the single front door. It terminates the three public routes and gates
+  # every browser-facing path -- /admin included -- on the PCS's Authelia SSO, so the
+  # admin panel no longer needs ADMIN_TOKEN. The Bitwarden client protocol surface is
+  # exempted from the gate (ALLOWED_PATHS below); see rationale.md.
   vaultwarden:
-    image: vaultwarden/server:1.37.0
+    image: ghcr.io/yundera/appshield:3.0.2
     container_name: vaultwarden
-    user: $PUID:$PGID
-    deploy:
-      resources:
-        limits:
-          memory: 1024M
-    cpu_shares: 70
-    healthcheck:
-      test: ["CMD", "sh", "-c", "curl -f -o /dev/null -s -w '%{http_code}' https://vaultwarden-$APP_DOMAIN/ | grep -q '200'"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
+    # OIDC identity: the AppShield auth-service builds its OIDC redirect URIs from
+    # os.hostname(), and the auth-registrar independently attests this app's name via the
+    # container's PTR record, rejecting any redirect URI that doesn't match. Must equal the
+    # app name, or Docker defaults the hostname to the random container ID and OIDC
+    # registration fails.
+    hostname: vaultwarden
+    restart: unless-stopped
     expose:
       - 80
+    environment:
+      BACKEND_HOST: "vaultwarden-backend"
+      BACKEND_PORT: "80"
+      LISTEN_PORT: "80"
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
+      # Bitwarden's mobile, desktop and browser-extension clients authenticate with their
+      # own bearer tokens and cannot run an OIDC browser flow, so the client protocol
+      # surface has to bypass the gate. This is the full set of client-reachable route
+      # mounts in Vaultwarden 1.37.0 (src/main.rs mounts + the root routes in
+      # src/api/web.rs). `admin` is deliberately absent, which is what puts the admin
+      # panel behind SSO -- a missing entry breaks a client loudly, it can never expose
+      # /admin. See rationale.md.
+      ALLOWED_PATHS: "api/,identity/,notifications/,events/,icons/,attachments/,.well-known/,app-id.json,alive"
+      # Vaultwarden caps attachment size itself; don't let the gate be the lower limit.
+      CLIENT_MAX_BODY_SIZE: "0"
     labels:
       caddy_0: vaultwarden-${APP_DOMAIN}
       caddy_0.import: gateway_tls
@@ -27,6 +42,40 @@ services:
       caddy_1.reverse_proxy: "{{upstreams 80}}"
       caddy_2: vaultwarden-${APP_PUBLIC_IP_DASH}.sslip.io
       caddy_2.reverse_proxy: "{{upstreams 80}}"
+    depends_on:
+      - vaultwarden-backend
+    deploy:
+      resources:
+        limits:
+          memory: 128M
+    cpu_shares: 80
+    networks:
+      - pcs
+
+  vaultwarden-backend:
+    image: vaultwarden/server:1.37.0
+    container_name: vaultwarden-backend
+    user: $PUID:$PGID
+    deploy:
+      resources:
+        limits:
+          memory: 1024M
+    cpu_shares: 70
+    # Checked from inside the container: /alive is a client protocol route, so it is
+    # reachable whether or not the SSO gate is in front of it.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/alive"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    expose:
+      - 80
+    # No caddy labels: the backend is reachable from outside only through AppShield.
+    # It stays on `pcs` because it has to resolve the PCS mail gateway (SMTP_HOST: smtp),
+    # which lives there -- so it is still reachable by other containers on the box. With
+    # DISABLE_ADMIN_TOKEN that means a peer container on `pcs` can reach /admin directly;
+    # see rationale.md for why that is not a regression against the shipped token.
     environment:
       PUID: $PUID
       PGID: $PGID
@@ -34,7 +83,11 @@ services:
       ROCKET_PORT: 80
       ROCKET_ADDRESS: 0.0.0.0
       SIGNUPS_ALLOWED: "true"
-      ADMIN_TOKEN: $APP_DEFAULT_PASSWORD
+      # No ADMIN_TOKEN. Upstream: "Enable this to bypass the admin panel security. This
+      # option is only meant to be used with the use of a separate auth layer in front."
+      # AppShield is that layer -- /admin is not in ALLOWED_PATHS, so every request to it
+      # is authenticated against the PCS SSO before Vaultwarden ever sees it.
+      DISABLE_ADMIN_TOKEN: "true"
       DOMAIN: https://vaultwarden-$APP_DOMAIN
       APP_NET: pcs
       SMTP_HOST: smtp
@@ -277,14 +330,24 @@ x-casaos:
       en_us: |
         `If you lose your master password, **NOBODY CAN RECOVER YOUR DATA**! Your vault will be permanently inaccessible. Store it in a safe place.`
 
-        **Default Admin Access**
+        **Admin Panel**
 
         | Setting | Value |
         |---------|-------|
         | Admin Panel | [🔗 Admin Panel](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Admin Token | `$APP_DEFAULT_PASSWORD` |
+        | Sign in with | Your Yundera account (single sign-on) |
 
-        Note: The admin token will not give you access to user vaults, only the user master password will.
+        There is **no admin token** to copy or keep safe: the admin panel is protected by this
+        server's single sign-on. Anyone who can sign in to this server can open it, so treat it
+        as an owner-only page.
+
+        Note: the admin panel does not give access to user vaults --- only the user master password does.
+
+        **Signing in**
+
+        Opening the vault in a **web browser** asks for your Yundera login first, then your vault
+        master password. The **Bitwarden apps and browser extensions connect directly** and are
+        not affected --- they keep using your Vaultwarden email and master password as before.
 
         **First Steps:**
 
@@ -300,14 +363,23 @@ x-casaos:
       ko_kr: |
         `마스터 비밀번호를 분실하면 **아무도 데이터를 복구할 수 없습니다**! 보관함에 영구적으로 접근할 수 없게 됩니다. 안전한 곳에 보관하세요.`
 
-        **기본 관리자 접근**
+        **관리자 패널**
 
         | 설정 | 값 |
         |------|-----|
         | 관리자 패널 | [🔗 관리자 패널](https://vaultwarden-$APP_DOMAIN/admin) |
-        | 관리자 토큰 | `$APP_DEFAULT_PASSWORD` |
+        | 로그인 방법 | Yundera 계정 (통합 인증) |
 
-        참고: 관리자 토큰으로는 사용자 보관함에 접근할 수 없으며, 오직 사용자 마스터 비밀번호만으로 가능합니다.
+        보관해야 할 **관리자 토큰이 없습니다**: 관리자 패널은 이 서버의 통합 인증(SSO)으로 보호됩니다.
+        이 서버에 로그인할 수 있는 사람은 누구나 열 수 있으므로 소유자 전용 페이지로 취급하세요.
+
+        참고: 관리자 패널로는 사용자 보관함에 접근할 수 없으며, 오직 사용자 마스터 비밀번호만으로 가능합니다.
+
+        **로그인 방법**
+
+        **웹 브라우저**에서 보관함을 열면 먼저 Yundera 로그인, 그다음 보관함 마스터 비밀번호를 요청합니다.
+        **Bitwarden 앱과 브라우저 확장 프로그램은 직접 연결**되므로 영향을 받지 않으며, 기존과 같이
+        Vaultwarden 이메일과 마스터 비밀번호를 사용합니다.
 
         **📧 이메일 통합**
 
@@ -326,15 +398,26 @@ x-casaos:
         **모바일/데스크톱 앱:**
 
         **Bitwarden 앱**을 다운로드하거나 **Bitwarden 브라우저 확장프로그램**을 사용하세요 - Vaultwarden과 완벽하게 작동합니다!
-
-        **중요**: Yundera의 SMTP 서비스가 자동으로 연결되어 비밀번호 복구가 바로 작동합니다!
       zh_cn: |
-        **默认账户设置**
+        `如果您丢失主密码，**没有人能恢复您的数据**！您的保险库将永久无法访问。请妥善保管。`
+
+        **管理员面板**
 
         | 设置 | 值 |
         |------|-----|
-        | 管理员面板 | 在应用URL后添加 `/admin` |
-        | 管理员令牌 | `$APP_DEFAULT_PASSWORD` |
+        | 管理员面板 | [🔗 管理员面板](https://vaultwarden-$APP_DOMAIN/admin) |
+        | 登录方式 | 您的 Yundera 账户（单点登录） |
+
+        **没有管理员令牌**需要复制或保管：管理员面板由本服务器的单点登录保护。
+        任何能登录本服务器的人都可以打开它，请将其视为仅限所有者的页面。
+
+        注意：管理员面板无法访问用户保险库，只有用户主密码才可以。
+
+        **登录方式**
+
+        在**网页浏览器**中打开保险库时，会先要求您登录 Yundera，然后输入保险库主密码。
+        **Bitwarden 应用和浏览器扩展直接连接**，不受影响 --- 它们继续使用您的 Vaultwarden
+        邮箱和主密码。
 
         **📧 邮件集成**
 
@@ -346,27 +429,35 @@ x-casaos:
 
         1. **创建主账户**: 安装后通过注册创建第一个用户账户。
 
-        2. **访问管理员面板**: 访问应用URL + `/admin`
-           示例: `https://vaultwarden-username.nsl.sh/admin`
+        2. **访问管理员面板**: [🔗 管理员面板](https://vaultwarden-$APP_DOMAIN/admin)
 
         3. **保护实例安全**: 设置完成后在管理员面板中禁用新注册。
 
         **移动端/桌面端应用：**
 
         下载**Bitwarden应用**或使用**Bitwarden浏览器扩展** - 与Vaultwarden完美配合！
-
-        **重要提示**: Yundera的SMTP服务自动连接 - 密码恢复立即可用！
       fr_fr: |
         `Si vous perdez votre mot de passe principal, **PERSONNE NE PEUT RÉCUPÉRER VOS DONNÉES** ! Votre coffre-fort sera définitivement inaccessible. Conservez-le dans un endroit sûr.`
 
-        **Accès Admin par Défaut**
+        **Panneau Admin**
 
         | Paramètre | Valeur |
         |-----------|--------|
         | Panneau Admin | [🔗 Panneau Admin](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Token Admin | `$APP_DEFAULT_PASSWORD` |
+        | Connexion via | Votre compte Yundera (authentification unique) |
 
-        Note : Le token admin ne vous donnera pas accès aux coffres-forts des utilisateurs, seul le mot de passe principal de l'utilisateur le peut.
+        Il n'y a **aucun token admin** à copier ou à conserver : le panneau admin est protégé par
+        l'authentification unique de ce serveur. Toute personne pouvant se connecter à ce serveur
+        peut l'ouvrir --- considérez-le comme une page réservée au propriétaire.
+
+        Note : le panneau admin ne donne pas accès aux coffres-forts des utilisateurs, seul le mot de passe principal de l'utilisateur le peut.
+
+        **Connexion**
+
+        Ouvrir le coffre-fort dans un **navigateur web** demande d'abord votre connexion Yundera,
+        puis votre mot de passe principal. Les **applications et extensions Bitwarden se
+        connectent directement** et ne sont pas concernées --- elles continuent d'utiliser votre
+        email Vaultwarden et votre mot de passe principal.
 
         **📧 Intégration Email**
 
@@ -385,19 +476,28 @@ x-casaos:
         **Pour les Apps Mobile/Bureau :**
 
         Téléchargez l'**app Bitwarden** ou utilisez l'**extension navigateur Bitwarden** - fonctionne parfaitement avec Vaultwarden !
-
-        **Important** : Le service SMTP de Yundera est automatiquement connecté - la récupération de mots de passe fonctionne immédiatement !
       de_de: |
         `Wenn Sie Ihr Master-Passwort verlieren, **KANN NIEMAND IHRE DATEN WIEDERHERSTELLEN**! Ihr Tresor wird dauerhaft unzugänglich. Bewahren Sie es an einem sicheren Ort auf.`
 
-        **Standard-Admin-Zugang**
+        **Admin-Panel**
 
         | Einstellung | Wert |
         |-------------|------|
         | Admin-Panel | [🔗 Admin-Panel](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Admin-Token | `$APP_DEFAULT_PASSWORD` |
+        | Anmeldung mit | Ihrem Yundera-Konto (Single Sign-on) |
 
-        Hinweis: Das Admin-Token gewährt Ihnen keinen Zugang zu Benutzer-Tresoren, nur das Benutzer-Master-Passwort kann das.
+        Es gibt **kein Admin-Token** zum Kopieren oder Aufbewahren: Das Admin-Panel wird durch das
+        Single Sign-on dieses Servers geschützt. Wer sich an diesem Server anmelden kann, kann es
+        öffnen --- behandeln Sie es als Seite nur für den Eigentümer.
+
+        Hinweis: Das Admin-Panel gewährt keinen Zugang zu Benutzer-Tresoren, nur das Benutzer-Master-Passwort kann das.
+
+        **Anmeldung**
+
+        Wird der Tresor im **Webbrowser** geöffnet, fragt er zuerst nach Ihrer Yundera-Anmeldung
+        und dann nach Ihrem Master-Passwort. Die **Bitwarden-Apps und Browser-Erweiterungen
+        verbinden sich direkt** und sind nicht betroffen --- sie nutzen weiterhin Ihre
+        Vaultwarden-E-Mail und Ihr Master-Passwort.
 
         **📧 E-Mail-Integration**
 
@@ -416,19 +516,28 @@ x-casaos:
         **Für Mobile/Desktop-Apps:**
 
         Laden Sie die **Bitwarden-App** herunter oder verwenden Sie die **Bitwarden-Browser-Erweiterung** - funktioniert perfekt mit Vaultwarden!
-
-        **Wichtig**: Der SMTP-Dienst von Yundera ist automatisch verbunden - Passwort-Wiederherstellung funktioniert sofort!
       es_es: |
         `Si pierdes tu contraseña maestra, **NADIE PUEDE RECUPERAR TUS DATOS**! Tu bóveda será permanentemente inaccesible. Guárdala en un lugar seguro.`
 
-        **Acceso de Admin por Defecto**
+        **Panel de Admin**
 
         | Configuración | Valor |
         |---------------|-------|
         | Panel de Admin | [🔗 Panel de Admin](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Token de Admin | `$APP_DEFAULT_PASSWORD` |
+        | Iniciar sesión con | Tu cuenta de Yundera (inicio de sesión único) |
 
-        Nota: El token de admin no te dará acceso a las bóvedas de usuarios, solo la contraseña maestra del usuario puede hacerlo.
+        **No hay token de admin** que copiar o guardar: el panel de administración está protegido
+        por el inicio de sesión único de este servidor. Cualquiera que pueda iniciar sesión en
+        este servidor puede abrirlo --- trátalo como una página solo para el propietario.
+
+        Nota: el panel de admin no da acceso a las bóvedas de usuarios, solo la contraseña maestra del usuario puede hacerlo.
+
+        **Inicio de sesión**
+
+        Abrir la bóveda en un **navegador web** pide primero tu inicio de sesión de Yundera y
+        luego tu contraseña maestra. Las **aplicaciones y extensiones de Bitwarden se conectan
+        directamente** y no se ven afectadas --- siguen usando tu email de Vaultwarden y tu
+        contraseña maestra.
 
         **📧 Integración de Email**
 
@@ -447,8 +556,6 @@ x-casaos:
         **Para Apps Móviles/Escritorio:**
 
         Descarga la **app Bitwarden** o usa la **extensión de navegador Bitwarden** - ¡funciona perfectamente con Vaultwarden!
-
-        **Importante**: El servicio SMTP de Yundera está conectado automáticamente - ¡la recuperación de contraseñas funciona de inmediato!
   index: /
   webui_port: 80
 

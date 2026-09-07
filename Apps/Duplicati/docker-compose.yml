@@ -2,7 +2,7 @@ name: duplicati
 services:
   duplicati:
     container_name: duplicati
-    image: linuxserver/duplicati:version-v2.3.0.4_stable_2026-07-09
+    image: linuxserver/duplicati:version-v2.4.0.0_stable_2026-09-03
     user: 0:0
     environment:
       PGID: 0
