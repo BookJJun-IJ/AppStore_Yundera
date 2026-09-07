@@ -117,16 +117,14 @@ x-casaos:
     architectures:
         - amd64
         - arm64
-    author: Yundera
     category: Entertainment
     description:
         en_us: |
             Stremio Community Edition.
             Features:
-            - Clean subdomain (no port prefix)
+            - Clean subdomain (served on a plain HTTPS address)
             - All-in-one streaming server with FFmpeg transcoding
-            - Protected by your Yundera single sign-on (Authelia SSO)
-    developer: Yundera
+            - Protected by the server's single sign-on (Authelia SSO)
     hostname: stremio-${APP_DOMAIN}
     index: /
     icon: icon.png
@@ -144,8 +142,8 @@ x-casaos:
     tips:
         before_install:
             en_us: |
-                Access is protected by your Yundera single sign-on: opening the app
-                sends you to the usual Yundera login page, no extra credentials needed.
+                Access is protected by the server's single sign-on: opening the app
+                sends you to the usual login page, where your server account signs you in.
                 You can find Stremio addons at https://addons.strem.io/
     title:
         en_us: Stremio

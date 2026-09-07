@@ -57,7 +57,6 @@ x-casaos:
     - arm
   main: caddy
   webui_port: 80
-  author: Yundera Team
   category: WEB
   tags: ["website", "developer"]
   description:
@@ -98,7 +97,7 @@ x-casaos:
       * **Instant updates** - Edit files and changes appear immediately
       * **Developer friendly** - Works with any static site workflow
 
-      With Caddy on **Yundera**, you can:
+      With Caddy on **your server**, you can:
       * Host unlimited static sites with HTTPS
       * Deploy modern JavaScript applications securely
       * Serve API documentation

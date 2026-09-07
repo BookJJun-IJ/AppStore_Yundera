@@ -50,7 +50,7 @@ services:
     networks:
       - pcs
 
-  # AppShield gates the admin panel with Yundera SSO and /mcp with OAuth 2.1.
+  # AppShield gates the admin panel with SSO and /mcp with OAuth 2.1.
   docusaurusmcp-proxy:
     image: ghcr.io/yundera/appshield:3.0.2
     container_name: docusaurusmcp
@@ -106,10 +106,8 @@ x-casaos:
   scheme: https
   port_map: "443"
   index: /
-  author: Yundera Team
   category: Developer
   tags: ["developer", "ai"]
-  developer: Yundera Team
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:
@@ -154,7 +152,7 @@ x-casaos:
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
         URL below — clients that support OAuth discovery (claude.ai, Claude
         Desktop) register themselves and open a browser for you to approve with
-        your Yundera login.
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {

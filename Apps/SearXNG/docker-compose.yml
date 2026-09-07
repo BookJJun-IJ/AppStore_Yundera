@@ -113,7 +113,6 @@ x-casaos:
     - amd64
     - arm64
   main: searxng-proxy
-  author: Yundera
   developer: searxng
   category: WEB
   tags: ["search", "privacy", "metasearch"]

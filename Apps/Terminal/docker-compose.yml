@@ -72,8 +72,6 @@ x-casaos:
     - amd64
     - arm64
   main: terminal
-  author: yundera
-  developer: yundera
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:
@@ -88,7 +86,7 @@ x-casaos:
 
       This is an administration tool, and it is not sandboxed. The session opens as **root on the host filesystem** (the host root `/` is mounted read-write and the shell chroots into it), so it can read and modify everything on the server: `/DATA/Documents`, `/DATA/Downloads`, `/DATA/Media`, `/DATA/Gallery`, every other app's data under `/DATA/AppData`, and the system files outside `/DATA`. Anything you could do over SSH as root, this app can do.
 
-      Access is protected by Yundera single sign-on: the terminal sits behind the AppShield gate, which registers with the PCS OIDC provider, so only your logged-in Yundera account reaches the shell. There is no separate app password to set.
+      Access is protected by the server's single sign-on: the terminal sits behind the AppShield gate, which registers with the PCS OIDC provider, so only your logged-in server account reaches the shell. You sign in with that same account instead of setting a separate app password.
 
       Install it only on a PCS you administer yourself. See rationale.md for the full privilege and mitigation write-up.
   title:
@@ -100,7 +98,7 @@ x-casaos:
 
         - It mounts the host root `/` read-write and opens the session as `root`, so it can read and change **every** file on the PCS — all of `/DATA` (Documents, Downloads, Media, Gallery, and every other app's data) as well as system files outside `/DATA`.
         - The container runs `privileged`, which is what makes host administration tasks work.
-        - Access is gated by Yundera single sign-on (AppShield OIDC) — sign in with your Yundera account; there is no separate password.
+        - Access is gated by the server's single sign-on (AppShield OIDC) — sign in with your server account, the same login you already use for the server.
 
         Treat access to this app as equivalent to root SSH access to the server. If you only need to browse or edit files, install **FileBrowser** instead.
   store_app_id: terminal

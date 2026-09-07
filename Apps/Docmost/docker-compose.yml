@@ -109,7 +109,6 @@ x-casaos:
     - arm64
   main: docmost
   webui_port: 80
-  author: Yundera Team
   category: Documents
   tags: ["productivity", "files", "business", "personal"]
   developer: Docmost

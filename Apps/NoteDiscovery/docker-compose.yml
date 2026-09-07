@@ -50,7 +50,6 @@ x-casaos:
     - arm64
   main: notediscovery
   webui_port: 80
-  author: Yundera Team
   category: Documents
   tags: ["productivity", "files", "personal"]
   developer: gamosoft

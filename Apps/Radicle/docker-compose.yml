@@ -137,7 +137,6 @@ x-casaos:
   architectures:
     - amd64
   main: radicle
-  author: Yundera Team
   developer: Radicle
   category: Developer
   tags: ["developer", "personal", "needs-public-ip"]
@@ -203,7 +202,8 @@ x-casaos:
         This app is public on purpose
 
         A Radicle node is a participant in a public peer-to-peer network. Both of
-        its addresses are open, with no Yundera login in front:
+        its addresses are served directly to the public, bypassing the server's
+        single sign-on:
 
         | Address | What it serves |
         | ------- | -------------- |
@@ -228,7 +228,8 @@ x-casaos:
         Cette application est publique, volontairement
 
         Un nœud Radicle participe à un réseau pair-à-pair public. Ses deux adresses
-        sont ouvertes, sans authentification Yundera devant :
+        sont servies directement au public, en contournant l'authentification
+        unique du serveur :
 
         | Adresse | Ce qu'elle sert |
         | ------- | --------------- |
@@ -254,8 +255,8 @@ x-casaos:
       zh_cn: |
         此应用有意保持公开
 
-        Radicle 节点是公开点对点网络的参与者。它的两个地址都是开放的，前面没有
-        Yundera 登录：
+        Radicle 节点是公开点对点网络的参与者。它的两个地址都直接向公众开放，
+        绕过服务器的单点登录：
 
         | 地址 | 提供的内容 |
         | ---- | ---------- |

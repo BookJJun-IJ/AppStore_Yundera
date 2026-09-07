@@ -14,7 +14,7 @@ services:
     network_mode: host
     environment:
       PORT: '51821'            # web UI port on the host (proxied by the sidecar)
-      INSECURE: 'true'         # plain HTTP; TLS is terminated by the Yundera gateway
+      INSECURE: 'true'         # plain HTTP; TLS is terminated by the gateway
       DISABLE_IPV6: 'true'
       INIT_ENABLED: 'true'
       INIT_USERNAME: admin
@@ -121,7 +121,6 @@ x-casaos:
       sleep 2
     done
   developer: WeejeWel
-  author: Yundera Team
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:

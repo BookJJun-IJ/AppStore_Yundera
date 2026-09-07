@@ -109,7 +109,6 @@ x-casaos:
     - amd64
     - arm64
   main: claude
-  author: Yundera
   category: Developer
   tags: ["developer", "ai"]
   description:
@@ -132,7 +131,7 @@ x-casaos:
       这是标准的沙盒版 Claude Code 应用，仅限于自己的工作区运行：没有 Docker 套接字、没有主机 SSH 访问、也没有 sudo 账户，无法触及主机虚拟机。如需对 PCS 进行管理和调试（具备主机控制权），请改装 “Claude Code (root)”。
 
       注意：本版本已禁用 MCP 自动化端点。
-  developer: Anthropic / Yundera
+  developer: Anthropic
   icon: icon.png
   screenshot_link:
     - screenshot-1.png

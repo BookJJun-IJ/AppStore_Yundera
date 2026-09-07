@@ -56,7 +56,6 @@ x-casaos:
     - arm64
   main: ntfy
   index: /
-  author: Yundera
   category: Utilities
   tags: ["developer", "ai"]
   description:

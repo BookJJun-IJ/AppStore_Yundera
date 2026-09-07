@@ -50,7 +50,7 @@ services:
       # directly at nextcloudmcp-backend:9650, bypassing the public OAuth route.
       - pcs
 
-  # AppShield gates the Web UI behind Yundera SSO, so the Nextcloud app-password
+  # AppShield gates the Web UI behind SSO, so the Nextcloud app-password
   # you paste into it isn't reachable by anyone guessing the subdomain, and gates
   # /mcp on OAuth 2.1 for remote MCP clients (see OAUTH_RESOURCE below). MCP
   # clients talking to `nextcloudmcp-backend:9650` directly on the pcs network
@@ -124,7 +124,6 @@ x-casaos:
     - amd64
   main: nextcloudmcp-proxy
   index: /
-  author: Aptero
   category: Utilities
   tags: ["developer", "ai"]
   description:
@@ -171,7 +170,6 @@ x-casaos:
       - 通过 Beacon MCP 聚合器（自动检测）统一驱动所有功能。
 
       **118 个 Nextcloud 工具 + 6 个 Talk 工具。** 一次应用密码设置。基于轮询（无需管理员 CLI）。详见内置文档。
-  developer: Aptero
   icon: icon.png
   screenshot_link:
     - screenshot-1.png
@@ -195,7 +193,7 @@ x-casaos:
         Nextcloud MCP needs access to a Nextcloud account (the sibling `Nextcloud` app works great). After installation:
 
         1. In Nextcloud, go to **Settings → Personal → Security → Devices & sessions** and click **Create new app password** (name it `nextcloudmcp`).
-        2. Open the Nextcloud MCP Web UI (you'll sign in with your Yundera account — no extra password) and paste the URL, username, and app-password.
+        2. Open the Nextcloud MCP Web UI (you'll sign in with your server account — the same single sign-on you already use) and paste the URL, username, and app-password.
         3. Click **Test connection**, then **Save**.
         4. (Optional) In the **LLM Target** panel, click **Rescan Beacon** — if an LLM MCP (e.g. ClaudeCode) is installed on the same server, it's auto-selected.
         5. (Optional) Enable **Auto-respond** to let Claude reply to your Talk DMs and `@<you>` mentions automatically.
@@ -213,7 +211,7 @@ x-casaos:
 
         `/mcp` is protected by OAuth 2.1. Clients that support OAuth discovery
         (claude.ai, Claude Desktop) register themselves and open a browser for
-        you to approve with your Yundera login. For clients needing a
+        you to approve with your server login (single sign-on). For clients needing a
         pre-created client_id/client_secret (n8n, custom scripts), create one at
         **https://nextcloudmcp-${APP_DOMAIN}/AppShield/oauth**.
         ```json
@@ -272,14 +270,14 @@ x-casaos:
 
         **Security:**
         - Your Nextcloud app-password is stored only in `/DATA/AppData/nextcloudmcp/config.json` and is never logged or returned via the API.
-        - The Web UI is protected by your Yundera single sign-on — no extra login needed.
+        - The Web UI is protected by the server's single sign-on — you sign in once with your server account.
       fr_fr: |
         **Demarrage**
 
         Nextcloud MCP a besoin d'acces a un compte Nextcloud (l'app soeur `Nextcloud` fonctionne parfaitement). Apres installation:
 
         1. Dans Nextcloud, allez dans **Parametres → Personnel → Securite → Appareils et sessions** et cliquez sur **Creer un nouveau mot de passe d'application** (nommez-le `nextcloudmcp`).
-        2. Ouvrez l'interface Web de Nextcloud MCP (vous vous connecterez avec votre compte Yundera — aucun mot de passe supplementaire) et collez l'URL, le nom d'utilisateur et le mot de passe d'application.
+        2. Ouvrez l'interface Web de Nextcloud MCP (vous vous connecterez avec votre compte serveur — la meme authentification unique que d'habitude) et collez l'URL, le nom d'utilisateur et le mot de passe d'application.
         3. Cliquez sur **Tester la connexion**, puis **Enregistrer**.
         4. (Optionnel) Dans le panneau **LLM Target**, cliquez sur **Rescan Beacon** — si un LLM MCP (ex. ClaudeCode) est installe sur le meme serveur, il est auto-selectionne.
         5. (Optionnel) Activez **Reponse automatique** pour laisser Claude repondre automatiquement a vos messages prives Talk et aux mentions `@<vous>`.
@@ -298,7 +296,7 @@ x-casaos:
         `/mcp` est protege par OAuth 2.1. Les clients compatibles avec la
         decouverte OAuth (claude.ai, Claude Desktop) s'enregistrent seuls et
         ouvrent un navigateur pour que vous autorisiez avec votre compte
-        Yundera. Pour les clients necessitant un client_id/client_secret
+        serveur (authentification unique). Pour les clients necessitant un client_id/client_secret
         pre-cree (n8n, scripts), creez-en un sur
         **https://nextcloudmcp-${APP_DOMAIN}/AppShield/oauth**.
         ```json
@@ -341,14 +339,14 @@ x-casaos:
 
         **Securite:**
         - Votre mot de passe d'application Nextcloud est stocke uniquement dans `/DATA/AppData/nextcloudmcp/config.json` et n'est jamais journalise ni retourne via l'API.
-        - L'interface Web est protegee par votre authentification unique Yundera (SSO) — aucune connexion supplementaire.
+        - L'interface Web est protegee par l'authentification unique du serveur (SSO) — vous vous connectez avec votre compte serveur.
       zh_cn: |
         **快速开始**
 
         Nextcloud MCP 需要访问 Nextcloud 账户（同级 `Nextcloud` 应用即可）。安装后：
 
         1. 在 Nextcloud 中，转到 **设置 → 个人 → 安全 → 设备和会话**，点击 **创建新的应用密码**（命名为 `nextcloudmcp`）。
-        2. 打开 Nextcloud MCP Web UI（使用您的 Yundera 账户登录——无需额外密码），粘贴 URL、用户名和应用密码。
+        2. 打开 Nextcloud MCP Web UI（使用您的服务器账户（单点登录）登录——与平时相同的登录方式），粘贴 URL、用户名和应用密码。
         3. 点击 **测试连接**，然后 **保存**。
         4. （可选）在 **LLM Target** 面板中，点击 **重新扫描 Beacon** — 如果同一服务器上安装了 LLM MCP（例如 ClaudeCode），它将被自动选中。
         5. （可选）启用 **自动回复**，让 Claude 自动回复您的 Talk 私信和 `@<您>` 提及。
@@ -363,7 +361,7 @@ x-casaos:
         **选项 2：公共 URL（OAuth）**
 
         `/mcp` 受 OAuth 2.1 保护。支持 OAuth 发现的客户端（claude.ai、Claude Desktop）
-        会自动注册并打开浏览器，让您使用 Yundera 账号授权。对于需要预先创建
+        会自动注册并打开浏览器，让您使用服务器账户（单点登录）授权。对于需要预先创建
         client_id/client_secret 的客户端（n8n、自定义脚本），请在
         **https://nextcloudmcp-${APP_DOMAIN}/AppShield/oauth** 创建。
         ```json
@@ -392,7 +390,7 @@ x-casaos:
 
         **安全：**
         - Nextcloud 应用密码仅存储在 `/DATA/AppData/nextcloudmcp/config.json` 中，不会被记录或通过 API 返回。
-        - Web UI 受您的 Yundera 单点登录 (SSO) 保护——无需额外登录。
+        - Web UI 受服务器的单点登录 (SSO) 保护——使用您的服务器账户登录即可。
 
 x-compose-app:
   schema_version: 2

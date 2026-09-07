@@ -54,7 +54,6 @@ x-casaos:
     - amd64
     - arm64
     - arm
-  author: Yundera Team
   category: Cloud
   tags: ["files", "personal", "business", "needs-public-ip"]
   description:

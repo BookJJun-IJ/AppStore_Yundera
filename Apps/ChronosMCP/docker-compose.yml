@@ -28,7 +28,7 @@ services:
       # Deliberately not on `pcs`; see the note above and tips Option 2.
       - chronosmcp-internal
 
-  # AppShield provides perimeter authentication for the web UI (Yundera SSO) and
+  # AppShield provides perimeter authentication for the web UI (SSO) and
   # for the /mcp endpoint (OAuth 2.1 broker — see OAUTH_RESOURCE below).
   chronosmcp-proxy:
     # 2.0.7+ is required: first image with the generic OAUTH_RESOURCE /
@@ -100,7 +100,6 @@ x-casaos:
   # reflect the service the user actually reaches.
   main: chronosmcp-proxy
   index: /
-  author: Yundera
   category: Utilities
   tags: ["developer", "ai"]
   description:
@@ -174,7 +173,7 @@ x-casaos:
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
         URL below — clients that support OAuth discovery (claude.ai, Claude
         Desktop) register themselves and open a browser for you to approve with
-        your Yundera login.
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {
@@ -189,7 +188,7 @@ x-casaos:
         scripts), open **https://chronosmcp-${APP_DOMAIN}/AppShield/oauth** and
         create one there.
 
-        **Option 2: Local Docker connection (no auth required) — not available on Yundera PCS**
+        **Option 2: Local Docker connection (no auth required) — on your server, use Option 1 instead**
 
         On a plain Docker host you could reach the backend directly over the
         shared network:
@@ -203,7 +202,7 @@ x-casaos:
           }
         }
         ```
-        *Not available here.* On Yundera PCS the launcher attaches the backend to
+        *Use Option 1 here.* On your server the launcher attaches the backend to
         this app's private network only, so `chronosmcp-backend` cannot be
         resolved from the shared `pcs` network — a client on `pcs` will not reach
         it. Use **Option 1** above, which is OAuth-gated and works from anywhere.
@@ -246,7 +245,7 @@ x-casaos:
         **选项 1：公共 URL（OAuth）**
 
         `/mcp` 端点受 OAuth 2.1 保护。将客户端指向以下 URL — 支持 OAuth 发现的客户端
-        （claude.ai、Claude Desktop）会自动注册并打开浏览器，让您使用 Yundera 账号授权。
+        （claude.ai、Claude Desktop）会自动注册并打开浏览器，让您使用服务器账号（单点登录）授权。
         ```json
         {
           "mcpServers": {
@@ -260,7 +259,7 @@ x-casaos:
         对于需要预先创建 client_id/client_secret 的客户端（n8n、自定义脚本），请打开
         **https://chronosmcp-${APP_DOMAIN}/AppShield/oauth** 创建。
 
-        **选项 2：本地 Docker 连接（无需认证）— 在 Yundera PCS 上不可用**
+        **选项 2：本地 Docker 连接（无需认证）— 在您的服务器上请改用选项 1**
 
         在普通 Docker 主机上，可以通过共享网络直接连接后端：
         ```json
@@ -273,7 +272,7 @@ x-casaos:
           }
         }
         ```
-        *此方式在 Yundera PCS 上不可用*：启动器只把后端接入本应用的专用网络，
+        *在您的服务器上请使用选项 1*：启动器只把后端接入本应用的专用网络，
         因此共享 `pcs` 网络上的客户端无法解析 `chronosmcp-backend`。请使用上面的
         **选项 1**（OAuth 保护，任何位置均可访问）。
 

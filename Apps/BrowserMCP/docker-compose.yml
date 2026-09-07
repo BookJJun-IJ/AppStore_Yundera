@@ -40,7 +40,7 @@ services:
           cpus: "2"
           memory: 2G
 
-  # AppShield provides perimeter authentication: the Yundera SSO (OIDC) gate for the
+  # AppShield provides perimeter authentication: the SSO (OIDC) gate for the
   # web UI and noVNC viewer, and the OAuth 2.1 broker for /mcp (machine clients).
   # The app itself trusts the network (auth is delegated to this sidecar), so the
   # browsermcp-backend container is never exposed directly — only this proxy gets caddy labels.
@@ -67,7 +67,7 @@ services:
       # Machine/API auth for the MCP endpoint. AppShield runs an OAuth/OIDC
       # authorization server fronting Dex and gates exactly the path named by the
       # resource URL (/mcp) on Bearer tokens; everything else stays behind the
-      # Yundera SSO gate.
+      # SSO gate.
       OAUTH_RESOURCE: "https://browsermcp-${APP_DOMAIN}/mcp"
       OAUTH_SCOPE: "mcp"
       OAUTH_DATA_DIR: "/data/oauth"
@@ -112,7 +112,6 @@ x-casaos:
   # unreachable. It is also the service Maison attaches ${APP_NET} to.
   main: browsermcp-proxy
   index: /
-  author: Yundera
   developer: Worph
   category: Developer
   tags: ["developer", "ai"]
@@ -179,7 +178,7 @@ x-casaos:
         **Getting Started**
 
         After installation, Chromium launches automatically inside a virtual display.
-        The Web UI is protected by your Yundera single sign-on — no extra login.
+        The Web UI is protected by your server's single sign-on — you sign in with your existing server account.
 
         **Web Interface:**
         - **Main UI** — Dashboard with live noVNC browser view, status, and tool information
@@ -193,7 +192,7 @@ x-casaos:
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
         URL below — clients that support OAuth discovery (claude.ai, Claude
         Desktop) register themselves and open a browser for you to approve with
-        your Yundera login.
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {
@@ -249,7 +248,7 @@ x-casaos:
         | `clear_cookies` | Clear all browser cookies |
 
         **Security:**
-        - The Web UI, live noVNC viewer, and `/api` endpoints sit behind your Yundera
+        - The Web UI, live noVNC viewer, and `/api` endpoints sit behind your server's
           single sign-on.
         - `/mcp` is gated separately on OAuth 2.1 Bearer tokens, so nothing on the
           public URL is reachable without a credential. Only the in-network address
@@ -258,7 +257,7 @@ x-casaos:
       zh_cn: |
         **快速开始**
 
-        安装后，Chromium 将在虚拟显示中自动启动。Web 界面受您的 Yundera 单点登录 (SSO) 保护——无需额外登录。
+        安装后，Chromium 将在虚拟显示中自动启动。Web 界面受您服务器的单点登录 (SSO) 保护——使用您现有的服务器账号登录即可。
 
         **Web 界面：**
         - **主 UI** — 带有实时 noVNC 浏览器视图、状态和工具信息的仪表板
@@ -268,7 +267,7 @@ x-casaos:
         **选项 1：公共 URL（OAuth 2.1）**
 
         `/mcp` 端点受 OAuth 2.1 保护。将客户端指向下面的 URL——支持 OAuth 发现的客户端
-        （claude.ai、Claude Desktop）会自动注册并打开浏览器，使用您的 Yundera 账号授权。
+        （claude.ai、Claude Desktop）会自动注册并打开浏览器，使用您服务器的账号（单点登录）授权。
         ```json
         {
           "mcpServers": {

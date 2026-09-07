@@ -64,7 +64,6 @@ x-casaos:
   webui_port: 80
   index: /
   scheme: https
-  author: Yundera Team
   category: Utilities
   developer: Meta (Facebook)
   icon: icon.png

@@ -58,7 +58,6 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  author: Yundera Team
   category: Utilities
   tags: ["personal", "family"]
   description:

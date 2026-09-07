@@ -55,7 +55,6 @@ x-casaos:
   index: /
   webui_port: 80
   store_app_id: navidrome
-  author: Yundera Team
   category: Media
   tags: ["media", "personal", "family"]
   developer: Deluan Quintão

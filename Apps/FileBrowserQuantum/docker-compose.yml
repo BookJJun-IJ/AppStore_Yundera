@@ -72,7 +72,6 @@ x-casaos:
     - amd64
     - arm64
   main: filebrowserquantum
-  author: Yundera Team
   developer: gtsteffaniak
   category: Cloud
   tags: ["files", "personal", "search"]
@@ -130,9 +129,10 @@ x-casaos:
         stick while that variable is set - clear the variable first, or create a
         second account for yourself under Settings > Users and leave `admin` alone.
 
-        Unlike the FileBrowser app, this one is **not** behind your Yundera login.
-        It has its own login page, and that password is the only thing protecting
-        it. Change it or replace the account before you use this on a real server.
+        Unlike the FileBrowser app, this one has **its own** login page instead of
+        your server's single sign-on, and that password is the only thing
+        protecting it. Change it or replace the account before you use this on a
+        real server.
 
         What this app can reach
 
@@ -160,10 +160,10 @@ x-casaos:
         conservé tant que cette variable est définie : videz-la d'abord, ou créez-vous
         un second compte dans Paramètres > Utilisateurs et laissez `admin` de côté.
 
-        Contrairement à l'application FileBrowser, celle-ci n'est **pas** protégée par
-        votre connexion Yundera. Elle a sa propre page de connexion, et ce mot de passe
-        est la seule chose qui la protège. Changez-le ou remplacez le compte avant
-        d'utiliser cette application sur un serveur réel.
+        Contrairement à l'application FileBrowser, celle-ci possède **sa propre** page
+        de connexion au lieu de l'authentification unique de votre serveur, et ce mot
+        de passe est la seule chose qui la protège. Changez-le ou remplacez le compte
+        avant d'utiliser cette application sur un serveur réel.
 
         Ce à quoi cette application a accès
 
@@ -190,8 +190,8 @@ x-casaos:
         在应用内修改密码就不会生效——请先清除该变量，或在「设置 > 用户」中为自己创建
         第二个账户，不要动 `admin`。
 
-        与 FileBrowser 应用不同，本应用**不**受 Yundera 登录保护。它有自己的登录页面，
-        而这个密码是唯一的防线。在正式服务器上使用前，请务必修改密码或更换账户。
+        与 FileBrowser 应用不同，本应用使用**自己的**登录页面，而不是服务器的单点登录，
+        这个密码是唯一的防线。在正式服务器上使用前，请务必修改密码或更换账户。
 
         此应用可以访问的范围
 

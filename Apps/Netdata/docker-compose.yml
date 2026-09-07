@@ -95,7 +95,6 @@ x-casaos:
     - amd64
     - arm64
   main: netdata-proxy
-  author: Yundera Team
   category: Utilities
   tags: ["developer", "privacy"]
   description:

@@ -67,7 +67,6 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  author: Yundera
   category: Network
   tags: ["privacy", "personal", "developer"]
   description:

@@ -92,10 +92,10 @@ x-casaos:
 
         📂 Config lives in `/DATA/AppData/prowlarr/`.
 
-        🔐 **Protected by your Yundera single sign-on.** Prowlarr sits behind the
-        PCS SSO gate, so there is no separate password to set or remember — open
-        the tile and you are already signed in. Nothing is reachable from the
-        internet without passing that gate first.
+        🔐 **Protected by your server account (single sign-on).** Prowlarr sits
+        behind the PCS SSO gate, so your existing server login is the only
+        password you need — open the tile and you are already signed in. Every
+        request from the internet passes through that gate first.
 
         🔗 **Wire up the full media stack** (each app is available standalone in the store, reachable by container name on the same server):
         - **Radarr** (`radarr:7878`) & **Sonarr** (`sonarr:8989`) — add them as *Applications* in Prowlarr so your indexers sync to them automatically.
@@ -106,7 +106,6 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  author: Yundera Team
   category: Media
   tags: ["media", "personal"]
   developer: Servarr (Prowlarr)

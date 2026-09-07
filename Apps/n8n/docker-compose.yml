@@ -92,7 +92,6 @@ x-casaos:
     - arm64
   main: n8n
   webui_port: 80
-  author: Yundera Team
   category: Automation
   tags: ["developer", "productivity", "business"]
   developer: n8n GmbH

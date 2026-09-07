@@ -37,7 +37,7 @@ services:
       TZ: $TZ
       # --- Identity (permanent — see caddy_1 note above) ---
       TUWUNEL_SERVER_NAME: matrix-${APP_DOMAIN}
-      # Federation runs over 443 (Yundera gateway); no port 8448 needed.
+      # Federation runs over 443 (the gateway); no port 8448 needed.
       # Tuwunel serves /.well-known/matrix/{client,server} itself with these values.
       TUWUNEL_WELL_KNOWN: '{client="https://matrix-${APP_DOMAIN}",server="matrix-${APP_DOMAIN}:443"}'
       # --- Listener ---
@@ -116,7 +116,6 @@ x-casaos:
     - arm64
   main: tuwunel-element
   webui_port: 8080
-  author: Yundera Team
   category: Chat
   tags: ["privacy", "personal", "communication"]
   developer: Matrix Construct
@@ -154,13 +153,13 @@ x-casaos:
       🚀 **Getting started**
 
       1. Install the app and open it — Element loads, already pointed at your server
-      2. **Create an account** — use your Yundera default password as the *registration token*
+      2. **Create an account** — use your server's default password as the *registration token*
       3. The **first account created becomes the server admin**
       4. On mobile, install the Element app and enter `matrix-<your-domain>` as the homeserver
 
       🪪 **Your identity is engine-independent**
 
-      Your Matrix ID lives on the neutral `matrix-<your-domain>` address — not on a software-specific one. If Yundera ships an alternative Matrix server engine in the future, it will use the **same identity domain**, so your `@you:matrix-…` handle survives an engine switch.
+      Your Matrix ID lives on the neutral `matrix-<your-domain>` address — not on a software-specific one. If your server ships an alternative Matrix server engine in the future, it will use the **same identity domain**, so your `@you:matrix-…` handle survives an engine switch.
   tips:
     before_install:
       en_us: |

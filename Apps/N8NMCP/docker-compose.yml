@@ -47,7 +47,7 @@ services:
     # 80 — user-facing API backend + Web UI (CONTRIBUTING "CPU Share Allocation").
     cpu_shares: 80
 
-  # AppShield provides perimeter authentication: the Yundera SSO (OIDC) gate for the
+  # AppShield provides perimeter authentication: the SSO (OIDC) gate for the
   # Web UI, and the OAuth 2.1 broker for /mcp (machine clients). The backend trusts
   # the network, so it is never exposed directly — only this proxy gets caddy labels.
   n8nmcp-proxy:
@@ -77,7 +77,7 @@ services:
       # Machine/API auth for the MCP endpoint. AppShield runs an OAuth/OIDC
       # authorization server fronting Dex and gates exactly the path named by the
       # resource URL (/mcp) on Bearer tokens; everything else stays behind the
-      # Yundera SSO gate. Replaces ALLOWED_PATHS, which exempted /mcp from the gate
+      # SSO gate. Replaces ALLOWED_PATHS, which exempted /mcp from the gate
       # and — with AUTH_HASH inert under Maison — left it uncredentialed.
       OAUTH_RESOURCE: "https://n8nmcp-${APP_DOMAIN}/mcp"
       OAUTH_SCOPE: "mcp"
@@ -114,7 +114,6 @@ x-casaos:
   # backend reported "unhealthy" while the app was serving correctly.
   main: n8nmcp-proxy
   index: /
-  author: Aptero
   category: Developer
   tags: ["developer", "ai"]
   description:
@@ -146,7 +145,6 @@ x-casaos:
       - Configurer la connexion n8n via l'interface Web integree — sans editer de fichiers
 
       **Parfait si vous:** Voulez que Claude / Cursor / tout client MCP construise et pilote vos automatisations n8n, ou combiner avec d'autres apps MCP (Beacon, Ntfy, Chronos) pour des workflows pilotes par IA de bout en bout.
-  developer: Aptero
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:
@@ -176,7 +174,7 @@ x-casaos:
         2. In n8n: **Settings → n8n API → Create an API key**
 
         **Setup (2 steps):**
-        1. Open this app's Web UI (you'll sign in with your Yundera account — no extra password)
+        1. Open this app's Web UI (you'll sign in with your server account — single sign-on, using the session you already have)
         2. Paste the **n8n Base URL** (`http://n8n:80` is pre-filled for the companion app) and the **API key**, click **Test connection** → **Save**
 
         **MCP Integration (for AI/LLMs):**
@@ -186,7 +184,7 @@ x-casaos:
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
         URL below — clients that support OAuth discovery (claude.ai, Claude
         Desktop) register themselves and open a browser for you to approve with
-        your Yundera login.
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {
@@ -237,7 +235,7 @@ x-casaos:
 
         **Security:**
         - The API key is stored only in `/DATA/AppData/n8nmcp/config.json` and is never logged or returned via the API
-        - The Web UI and `/api` endpoints sit behind your Yundera single sign-on — no extra login needed
+        - The Web UI and `/api` endpoints sit behind the server's single sign-on — you reuse the session you already have
         - `/mcp` is gated separately on OAuth 2.1 Bearer tokens, so nothing on the
           public URL is reachable without a credential. Only the in-network address
           `http://n8nmcp-backend:9640/mcp` (Option 2) is unauthenticated, and it is

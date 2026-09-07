@@ -53,7 +53,7 @@ services:
     networks:
       - pcs
 
-  # AppShield gates the config UI with Yundera SSO (humans) and the /mcp
+  # AppShield gates the config UI with SSO (humans) and the /mcp
   # endpoint with its OAuth 2.1 broker (machines). Nothing is reachable
   # unauthenticated from the public URL.
   docmostmcp-proxy:
@@ -82,7 +82,7 @@ services:
       # Machine/API auth for the MCP endpoint. AppShield runs an OAuth/OIDC
       # authorization server fronting Dex and gates exactly the path named by the
       # resource URL (/mcp) on Bearer tokens; everything else stays behind the
-      # Yundera SSO gate. Replaces ALLOWED_PATHS, which exempted /mcp from the gate
+      # SSO gate. Replaces ALLOWED_PATHS, which exempted /mcp from the gate
       # and — with AUTH_HASH inert under Maison — left it uncredentialed.
       OAUTH_RESOURCE: "https://docmostmcp-${APP_DOMAIN}/mcp"
       OAUTH_SCOPE: "mcp"
@@ -137,7 +137,6 @@ x-casaos:
       description:
         en_us: HTTP timeout (seconds) for Docmost API calls. Default 30.
         fr_fr: Delai d'expiration HTTP (en secondes) pour les appels a l'API Docmost. Par defaut 30.
-  author: Aptero
   category: Developer
   tags: ["developer", "ai"]
   description:
@@ -159,7 +158,6 @@ x-casaos:
       Enveloppe le serveur Python communautaire [`aleksvin8888/local-docmost-mcp`](https://github.com/aleksvin8888/local-docmost-mcp) avec un shim de transport streamable-HTTP pour que tout client compatible MCP puisse se connecter (Claude Desktop, Claude Code, Cursor, VS Code, etc.).
 
       **Parfait si vous:** Avez un Docmost auto-heberge et voulez que des assistants IA lisent, ecrivent ou maintiennent son contenu sans payer le plan Enterprise de Docmost (le seul niveau avec support MCP integre).
-  developer: Aptero
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:
@@ -179,7 +177,7 @@ x-casaos:
       en_us: |
         **Set your Docmost credentials in the config UI after install**
 
-        There is no install form to fill in — the app installs with `DOCMOST_EMAIL` and `DOCMOST_PASSWORD` empty and the MCP server starts, but every Docmost call fails until you set them. Click **Open** on the app card to land on the bundled **config UI** at `/`, where you enter the credentials, run a live **Test connection** against Docmost, and copy the ready-to-paste public MCP URL. What you save is written to `/DATA/AppData/docmostmcp/data/config.json` and survives redeploys.
+        You set the credentials after install rather than in an install form — the app installs with `DOCMOST_EMAIL` and `DOCMOST_PASSWORD` empty and the MCP server starts, but every Docmost call fails until you set them. Click **Open** on the app card to land on the bundled **config UI** at `/`, where you enter the credentials, run a live **Test connection** against Docmost, and copy the ready-to-paste public MCP URL. What you save is written to `/DATA/AppData/docmostmcp/data/config.json` and survives redeploys.
 
         **Prerequisites:**
         1. A running **Docmost** instance reachable from the `pcs` Docker network (typically the companion Docmost app installed from this store)
@@ -191,8 +189,8 @@ x-casaos:
 
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the URL
         below — clients that support OAuth discovery (claude.ai, Claude Desktop)
-        register themselves and open a browser for you to approve with your Yundera
-        login.
+        register themselves and open a browser for you to approve with your
+        server account (single sign-on).
         ```json
         {
           "mcpServers": {
@@ -243,7 +241,7 @@ x-casaos:
 
         **Security:**
         - Docmost credentials are stored only in `/DATA/AppData/docmostmcp/data/config.json` on this server and never logged or returned via the API
-        - Authentication is on by default: the config UI is behind your Yundera single sign-on, and `/mcp` is behind OAuth 2.1. Nothing is reachable unauthenticated from the public URL
+        - Authentication is on by default: the config UI is behind the server's single sign-on, and `/mcp` is behind OAuth 2.1. Nothing is reachable unauthenticated from the public URL
 
 x-compose-app:
   schema_version: 2

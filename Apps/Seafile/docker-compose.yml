@@ -304,7 +304,7 @@ x-casaos:
       echo "Re-adding SMTP configuration..."
       cat >> "$SEAHUB_SETTINGS" << EOF
 
-    # SMTP configuration (Yundera built-in SMTP service)
+    # SMTP configuration (the server's built-in SMTP service)
     EMAIL_USE_TLS = False
     EMAIL_HOST = 'smtp'
     EMAIL_HOST_USER = 'casaos'
@@ -364,7 +364,6 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  author: Yundera Team
   category: Cloud
   tags: ["files", "personal", "business"]
   description:

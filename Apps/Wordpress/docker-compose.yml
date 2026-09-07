@@ -78,7 +78,6 @@ x-casaos:
   architectures:
     - amd64
     - arm64
-  author: Yundera Team
   category: Web
   developer: WordPress Foundation
   icon: icon.png

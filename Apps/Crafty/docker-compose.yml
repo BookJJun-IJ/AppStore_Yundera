@@ -73,7 +73,6 @@ x-casaos:
   main: crafty
   webui_port: 80                         # gateway-side port; the Caddy labels map this clean subdomain to the container's 8443. Do NOT set this to 8443 or the dashboard builds 8443-crafty-<domain>:8443
   index: /
-  author: Yundera Team
   category: Games
   tags: ["games", "personal", "family", "needs-public-ip"]
   developer: Arcadia Technology

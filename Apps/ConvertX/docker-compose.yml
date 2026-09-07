@@ -80,7 +80,6 @@ x-casaos:
     - amd64
     - arm64
   main: convertx
-  author: Yundera Team
   category: Utilities
   tags: ["files", "personal"]
   developer: C4illin

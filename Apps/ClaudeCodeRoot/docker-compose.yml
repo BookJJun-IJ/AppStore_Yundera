@@ -111,7 +111,6 @@ x-casaos:
     - amd64
     - arm64
   main: clauderoot
-  author: Yundera
   category: Developer
   tags: ["developer", "ai"]
   description:
@@ -144,7 +143,7 @@ x-casaos:
       - 可挂载整个 /DATA（包括其他应用的数据），并可对虚拟机执行任何维护操作
 
       默认密码为自动生成，请在应用设置中查看 AUTH_PASSWORD 的值。
-  developer: Anthropic / Yundera
+  developer: Anthropic
   icon: icon.png
   screenshot_link:
     - screenshot-1.png

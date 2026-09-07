@@ -101,7 +101,6 @@ x-casaos:
   index: /
   # No pre-install-cmd: the data dir is created and chowned to $PUID:$PGID by
   # x-compose-app.folders below, before any image is pulled or container starts.
-  author: Yundera Team
   category: Downloader
   tags: ["files", "personal", "needs-public-ip"]
   developer: cparthiv
@@ -163,8 +162,9 @@ x-casaos:
     before_install:
       en_us: |
         **Access & login**
-        - Open the app URL and sign in with your Yundera SSO account — AppShield
-          (Authelia) gates the dashboard, so there is no separate password to set.
+        - Open the app URL and sign in with your server account (single sign-on) —
+          AppShield (Authelia) gates the dashboard, so you reuse the credentials you
+          already have.
 
         **BitTorrent connectivity**
         - Peer traffic uses port **6881 (TCP + UDP)**, published directly to the

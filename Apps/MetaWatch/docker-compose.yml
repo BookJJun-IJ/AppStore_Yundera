@@ -299,14 +299,12 @@ x-casaos:
   webui_port: 80
   index: /
   store_app_id: metawatch
-  author: Yundera Team
   category: Media
   # `needs-public-ip` is the reserved functional tag: this app publishes raw
   # libp2p TCP ports (4003/4004) that remote peers must dial inbound. Behind
   # CGNAT or the mesh-router tunnel it still installs and runs, but it can only
   # make outbound connections.
   tags: ["media", "personal", "needs-public-ip"]
-  developer: Aptero Team
   icon: icon.png
   thumbnail: thumbnail.png
   screenshot_link:
@@ -385,7 +383,7 @@ x-casaos:
     before_install:
       en_us: |
         **Access & sign-in**
-        - Open the app URL and sign in with your Yundera SSO account (AppShield).
+        - Open the app URL and sign in with your server account (single sign-on, via AppShield).
         - Then create a MetaWatch profile. You are shown a **secret key — save
           it**. It is the only way back in: sign-out is real, and the key is
           never recoverable from the server without an existing session.

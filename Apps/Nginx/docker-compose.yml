@@ -53,7 +53,6 @@ x-casaos:
     - arm
   main: nginx
   webui_port: 80
-  author: Yundera Team
   category: WEB
   tags: ["website", "developer"]
   description:
@@ -92,7 +91,7 @@ x-casaos:
       • **Instant updates** — edit files and changes appear immediately
       • **Developer friendly** — works with any static site workflow
 
-      With nginx on **Yundera**, you can:
+      With nginx on **your server**, you can:
       • Host unlimited static sites
       • Deploy modern JavaScript applications
       • Serve API documentation

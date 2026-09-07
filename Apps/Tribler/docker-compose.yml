@@ -1,7 +1,7 @@
 name: tribler
 
 services:
-  # OIDC SSO front-door (Yundera Authelia). Only this container is publicly reachable.
+  # OIDC SSO front-door (Authelia). Only this container is publicly reachable.
   tribler:
     image: ghcr.io/yundera/appshield:3.0.2
     container_name: tribler
@@ -124,11 +124,11 @@ x-casaos:
   tips:
     before_install:
       en_us: |
-        Tribler is protected by your Yundera single sign-on (Authelia) — no extra login.
+        Tribler is protected by your server's single sign-on (Authelia) — you sign in once with
+        your server account.
         Downloads are saved to `/DATA/Downloads`.
         By default downloads are anonymized through Tribler's onion network (1 hop); you can
         change the number of hops or disable anonymity per-download in the UI.
-  author: Yundera Team
   category: Downloader
   tags: ["files", "privacy", "personal"]
   developer: Tribler

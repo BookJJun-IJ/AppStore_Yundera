@@ -75,7 +75,6 @@ x-casaos:
     - arm64
   main: stirlingpdf
   webui_port: 80
-  author: Yundera Team
   category: Office
   tags: ["files", "productivity", "business", "personal"]
   developer: Stirling Tools
@@ -230,7 +229,7 @@ x-casaos:
         This app can read **and write** your `Downloads` folder (`/DATA/Downloads`), so you can open PDFs you already saved and write results straight back to it. Everything else it stores stays inside its own app folder.
 
         **💡 Version:**
-        Ships Stirling PDF **2.14.3** — PDF commenting, RFC 3161 timestamps, Pdfium rendering and advanced multi-page layouts. Login stays enabled on Yundera, so use the credentials above.
+        Ships Stirling PDF **2.14.3** — PDF commenting, RFC 3161 timestamps, Pdfium rendering and advanced multi-page layouts. Login stays enabled on your server, so use the credentials above.
 
         **How to use:**
         Upload PDF files through your web browser and start editing them right away!
@@ -258,7 +257,7 @@ x-casaos:
         이 앱은 `Downloads` 폴더(`/DATA/Downloads`)를 **읽고 쓸 수** 있습니다. 이미 저장한 PDF를 열고 결과를 바로 저장할 수 있습니다. 그 외 데이터는 모두 앱 전용 폴더에 저장됩니다.
 
         **💡 버전:**
-        Stirling PDF **2.14.3** 제공 — PDF 댓글, RFC 3161 타임스탬프, Pdfium 렌더링, 고급 다중 페이지 레이아웃. Yundera에서는 로그인이 활성화되어 있으므로 위의 자격 증명을 사용하세요.
+        Stirling PDF **2.14.3** 제공 — PDF 댓글, RFC 3161 타임스탬프, Pdfium 렌더링, 고급 다중 페이지 레이아웃. 이 서버에서는 로그인이 활성화되어 있으므로 위의 자격 증명을 사용하세요.
 
         **사용 방법:**
         웹 브라우저를 통해 PDF 파일을 업로드하고 바로 편집을 시작할 수 있습니다!
@@ -286,7 +285,7 @@ x-casaos:
         此应用可以**读写**您的 `Downloads` 文件夹(`/DATA/Downloads`),因此您可以打开已保存的PDF并将结果直接写回。其他所有数据都保存在应用自己的文件夹中。
 
         **💡 版本:**
-        提供 Stirling PDF **2.14.3** — PDF评论、RFC 3161 时间戳、Pdfium 渲染和高级多页面布局。Yundera 上登录保持启用,请使用上面的凭据。
+        提供 Stirling PDF **2.14.3** — PDF评论、RFC 3161 时间戳、Pdfium 渲染和高级多页面布局。在您的服务器上登录保持启用,请使用上面的凭据。
 
         **如何使用:**
         通过网页浏览器上传PDF文件并立即开始编辑!
@@ -314,7 +313,7 @@ x-casaos:
         Cette application peut **lire et écrire** dans votre dossier `Downloads` (`/DATA/Downloads`), afin d'ouvrir les PDF déjà enregistrés et d'y réécrire les résultats. Toutes ses autres données restent dans son propre dossier d'application.
 
         **💡 Version :**
-        Fournit Stirling PDF **2.14.3** — commentaires PDF, horodatage RFC 3161, rendu Pdfium et mises en page multi-pages avancées. La connexion reste activée sur Yundera : utilisez les identifiants ci-dessus.
+        Fournit Stirling PDF **2.14.3** — commentaires PDF, horodatage RFC 3161, rendu Pdfium et mises en page multi-pages avancées. La connexion reste activée sur votre serveur : utilisez les identifiants ci-dessus.
 
         **Comment utiliser :**
         Téléchargez des fichiers PDF via votre navigateur web et commencez à les éditer immédiatement !
@@ -342,7 +341,7 @@ x-casaos:
         Esta aplicación puede **leer y escribir** en tu carpeta `Downloads` (`/DATA/Downloads`), para abrir los PDF que ya guardaste y escribir los resultados directamente allí. Todos sus demás datos permanecen en su propia carpeta de aplicación.
 
         **💡 Versión:**
-        Incluye Stirling PDF **2.14.3** — comentarios PDF, marcas de tiempo RFC 3161, renderizado Pdfium y diseños multipágina avanzados. El inicio de sesión permanece habilitado en Yundera: usa las credenciales de arriba.
+        Incluye Stirling PDF **2.14.3** — comentarios PDF, marcas de tiempo RFC 3161, renderizado Pdfium y diseños multipágina avanzados. El inicio de sesión permanece habilitado en tu servidor: usa las credenciales de arriba.
 
         **Cómo usar:**
         ¡Sube archivos PDF a través de tu navegador web y comienza a editarlos de inmediato!

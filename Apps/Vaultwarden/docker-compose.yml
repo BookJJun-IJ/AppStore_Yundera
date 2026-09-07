@@ -1,10 +1,12 @@
 name: vaultwarden
 
 services:
-  # AppShield is the single front door. It terminates the three public routes and gates
-  # every browser-facing path -- /admin included -- on the PCS's Authelia SSO, so the
-  # admin panel no longer needs ADMIN_TOKEN. The Bitwarden client protocol surface is
-  # exempted from the gate (ALLOWED_PATHS below); see rationale.md.
+  # AppShield gates ONLY the admin panel. Caddy splits the single public hostname by
+  # path: /admin (plus AppShield's own /nhl-auth endpoints) goes through the SSO
+  # sidecar, everything else -- the web vault and the whole Bitwarden client protocol --
+  # is proxied straight to Vaultwarden, exactly as before. That is what lets the admin
+  # token be dropped without adding a second login in front of the vault.
+  # See rationale.md.
   vaultwarden:
     image: ghcr.io/yundera/appshield:3.0.2
     container_name: vaultwarden
@@ -23,25 +25,35 @@ services:
       LISTEN_PORT: "80"
       OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
       REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
-      # Bitwarden's mobile, desktop and browser-extension clients authenticate with their
-      # own bearer tokens and cannot run an OIDC browser flow, so the client protocol
-      # surface has to bypass the gate. This is the full set of client-reachable route
-      # mounts in Vaultwarden 1.37.0 (src/main.rs mounts + the root routes in
-      # src/api/web.rs). `admin` is deliberately absent, which is what puts the admin
-      # panel behind SSO -- a missing entry breaks a client loudly, it can never expose
-      # /admin. See rationale.md.
-      ALLOWED_PATHS: "api/,identity/,notifications/,events/,icons/,attachments/,.well-known/,app-id.json,alive"
-      # Vaultwarden caps attachment size itself; don't let the gate be the lower limit.
-      CLIENT_MAX_BODY_SIZE: "0"
+      # No ALLOWED_PATHS: this sidecar only ever sees /admin and /nhl-auth, because Caddy
+      # never routes anything else to it. Uncomment to restrict the admin panel to members
+      # of the `admins` group instead of every PCS account that can sign in:
+      # OIDC_REQUIRED_GROUPS: "admins"
     labels:
+      # Two handle branches per site, ordered: the @sso branch takes /admin and the
+      # sidecar's own auth endpoints, the bare fallback takes everything else. The
+      # fallback names the backend container directly -- `{{upstreams 80}}` would resolve
+      # to this service (the sidecar), which is the branch we are trying to avoid.
       caddy_0: vaultwarden-${APP_DOMAIN}
       caddy_0.import: gateway_tls
-      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_0.@sso.path: "/admin /admin/* /nhl-auth/*"
+      caddy_0.0_handle: "@sso"
+      caddy_0.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_0.1_handle: ""
+      caddy_0.1_handle.reverse_proxy: "vaultwarden-backend:80"
       caddy_1: vaultwarden-${APP_PUBLIC_IP_DASH}.nip.io
       caddy_1.import: gateway_tls
-      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_1.@sso.path: "/admin /admin/* /nhl-auth/*"
+      caddy_1.0_handle: "@sso"
+      caddy_1.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_1.1_handle: ""
+      caddy_1.1_handle.reverse_proxy: "vaultwarden-backend:80"
       caddy_2: vaultwarden-${APP_PUBLIC_IP_DASH}.sslip.io
-      caddy_2.reverse_proxy: "{{upstreams 80}}"
+      caddy_2.@sso.path: "/admin /admin/* /nhl-auth/*"
+      caddy_2.0_handle: "@sso"
+      caddy_2.0_handle.reverse_proxy: "{{upstreams 80}}"
+      caddy_2.1_handle: ""
+      caddy_2.1_handle.reverse_proxy: "vaultwarden-backend:80"
     depends_on:
       - vaultwarden-backend
     deploy:
@@ -61,8 +73,8 @@ services:
         limits:
           memory: 1024M
     cpu_shares: 70
-    # Checked from inside the container: /alive is a client protocol route, so it is
-    # reachable whether or not the SSO gate is in front of it.
+    # /alive is a plain liveness route, checked from inside the container so the result
+    # does not depend on the gateway or the sidecar.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:80/alive"]
       interval: 30s
@@ -71,11 +83,12 @@ services:
       start_period: 30s
     expose:
       - 80
-    # No caddy labels: the backend is reachable from outside only through AppShield.
-    # It stays on `pcs` because it has to resolve the PCS mail gateway (SMTP_HOST: smtp),
-    # which lives there -- so it is still reachable by other containers on the box. With
-    # DISABLE_ADMIN_TOKEN that means a peer container on `pcs` can reach /admin directly;
-    # see rationale.md for why that is not a regression against the shipped token.
+    # No caddy labels of its own: Caddy reaches it through the fallback branch above, so
+    # the routing decision lives in exactly one place. It stays on `pcs` because it has to
+    # resolve the PCS mail gateway (SMTP_HOST: smtp) -- which also means a peer container
+    # on `pcs` can reach /admin directly. Upstream is explicit that disabling the token
+    # needs "extra steps to secure it. This includes externally and locally"; see
+    # rationale.md for why that is not a regression against the shipped token.
     environment:
       PUID: $PUID
       PGID: $PGID
@@ -83,10 +96,10 @@ services:
       ROCKET_PORT: 80
       ROCKET_ADDRESS: 0.0.0.0
       SIGNUPS_ALLOWED: "true"
-      # No ADMIN_TOKEN. Upstream: "Enable this to bypass the admin panel security. This
-      # option is only meant to be used with the use of a separate auth layer in front."
-      # AppShield is that layer -- /admin is not in ALLOWED_PATHS, so every request to it
-      # is authenticated against the PCS SSO before Vaultwarden ever sees it.
+      # No ADMIN_TOKEN. Upstream: "If you have another method you would like to use for
+      # authentication to the /admin page then you can set the DISABLE_ADMIN_TOKEN
+      # variable to true." AppShield is that method, wired to the PCS SSO by the Caddy
+      # path split above.
       DISABLE_ADMIN_TOKEN: "true"
       DOMAIN: https://vaultwarden-$APP_DOMAIN
       APP_NET: pcs
@@ -113,7 +126,6 @@ x-casaos:
     - amd64
     - arm64
   main: vaultwarden
-  author: Yundera Team
   category: Utilities
   tags: ["privacy", "personal", "business"]
   description:
@@ -141,14 +153,14 @@ x-casaos:
       • **Faster and lighter** --- uses less resources than the official version
       • **Same features** --- works with all Bitwarden apps and browsers
 
-      With Vaultwarden on **Yundera**, you can:
+      With Vaultwarden on **your server**, you can:
       • Run your own password manager server
       • Access your passwords from any device (mobile, browser, desktop)
       • Share access with your team or family (if you want)
       • Keep your data private --- it never leaves your server
 
       **📧 Email Integration:**
-      This version uses Yundera's built-in SMTP service for email delivery - password recovery and notifications work automatically!
+      This version uses the server's built-in SMTP service for email delivery - password recovery and notifications work automatically!
     ko_kr: |
       🔐 **Vaultwarden이란?**
 
@@ -173,14 +185,14 @@ x-casaos:
       • **더 빠르고 가벼움** --- 공식 버전보다 적은 자원 사용
       • **동일한 기능** --- 모든 Bitwarden 앱과 브라우저에서 작동
 
-      **Yundera**의 Vaultwarden으로 할 수 있는 것:
+      **내 서버**에서 Vaultwarden으로 할 수 있는 것:
       • 자신만의 비밀번호 관리 서버 운영
       • 모든 기기에서 비밀번호 접근 (모바일, 브라우저, 데스크톱)
       • 팀이나 가족과 접근 권한 공유 (원하는 경우)
       • 데이터 프라이버시 유지 --- 데이터가 서버를 떠나지 않음
 
       **📧 이메일 통합:**
-      이 버전은 Yundera의 내장 SMTP 서비스를 사용합니다 - 비밀번호 복구와 알림이 자동으로 작동합니다!
+      이 버전은 서버의 내장 SMTP 서비스를 사용합니다 - 비밀번호 복구와 알림이 자동으로 작동합니다!
     zh_cn: |
       🔐 **什么是Vaultwarden？**
 
@@ -205,14 +217,14 @@ x-casaos:
       • **更快更轻** --- 比官方版本占用更少资源
       • **功能相同** --- 兼容所有Bitwarden应用和浏览器
 
-      在**Yundera**上使用Vaultwarden，您可以：
+      在**您的服务器**上使用Vaultwarden，您可以：
       • 运行自己的密码管理服务器
       • 从任何设备访问密码（移动端、浏览器、桌面端）
       • 与团队或家人分享访问权限（如果您愿意）
       • 保持数据隐私 --- 数据永不离开您的服务器
 
       **📧 邮件集成：**
-      此版本使用Yundera内置的SMTP服务 - 密码恢复和通知自动运行！
+      此版本使用服务器内置的SMTP服务 - 密码恢复和通知自动运行！
     fr_fr: |
       🔐 **Qu'est-ce que Vaultwarden ?**
 
@@ -237,14 +249,14 @@ x-casaos:
       • **Plus rapide et plus léger** --- utilise moins de ressources que la version officielle
       • **Mêmes fonctionnalités** --- fonctionne avec toutes les applications et navigateurs Bitwarden
 
-      Avec Vaultwarden sur **Yundera**, vous pouvez :
+      Avec Vaultwarden sur **votre serveur**, vous pouvez :
       • Faire fonctionner votre propre serveur de gestionnaire de mots de passe
       • Accéder à vos mots de passe depuis n'importe quel appareil (mobile, navigateur, bureau)
       • Partager l'accès avec votre équipe ou famille (si vous le souhaitez)
       • Garder vos données privées --- elles ne quittent jamais votre serveur
 
       **📧 Intégration Email :**
-      Cette version utilise le service SMTP intégré de Yundera - la récupération de mots de passe et les notifications fonctionnent automatiquement !
+      Cette version utilise le service SMTP intégré du serveur - la récupération de mots de passe et les notifications fonctionnent automatiquement !
     de_de: |
       🔐 **Was ist Vaultwarden?**
 
@@ -269,14 +281,14 @@ x-casaos:
       • **Schneller und leichter** --- verbraucht weniger Ressourcen als die offizielle Version
       • **Gleiche Funktionen** --- funktioniert mit allen Bitwarden-Apps und Browsern
 
-      Mit Vaultwarden auf **Yundera** können Sie:
+      Mit Vaultwarden auf **Ihrem Server** können Sie:
       • Ihren eigenen Passwort-Manager-Server betreiben
       • Von jedem Gerät auf Ihre Passwörter zugreifen (mobil, Browser, Desktop)
       • Zugang mit Ihrem Team oder Familie teilen (wenn Sie möchten)
       • Ihre Daten privat halten --- sie verlassen niemals Ihren Server
 
       **📧 E-Mail-Integration:**
-      Diese Version nutzt den integrierten SMTP-Dienst von Yundera - Passwort-Wiederherstellung und Benachrichtigungen funktionieren automatisch!
+      Diese Version nutzt den integrierten SMTP-Dienst des Servers - Passwort-Wiederherstellung und Benachrichtigungen funktionieren automatisch!
     es_es: |
       🔐 **¿Qué es Vaultwarden?**
 
@@ -301,14 +313,14 @@ x-casaos:
       • **Más rápido y ligero** --- usa menos recursos que la versión oficial
       • **Mismas características** --- funciona con todas las aplicaciones y navegadores de Bitwarden
 
-      Con Vaultwarden en **Yundera**, puedes:
+      Con Vaultwarden en **tu servidor**, puedes:
       • Ejecutar tu propio servidor de gestor de contraseñas
       • Acceder a tus contraseñas desde cualquier dispositivo (móvil, navegador, escritorio)
       • Compartir acceso con tu equipo o familia (si quieres)
       • Mantener tus datos privados --- nunca salen de tu servidor
 
       **📧 Integración de Email:**
-      Esta versión utiliza el servicio SMTP integrado de Yundera - ¡la recuperación de contraseñas y las notificaciones funcionan automáticamente!
+      Esta versión utiliza el servicio SMTP integrado del servidor - ¡la recuperación de contraseñas y las notificaciones funcionan automáticamente!
   developer: Vaultwarden Community
   icon: icon.png
   screenshot_link:
@@ -335,19 +347,18 @@ x-casaos:
         | Setting | Value |
         |---------|-------|
         | Admin Panel | [🔗 Admin Panel](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Sign in with | Your Yundera account (single sign-on) |
+        | Sign in with | Your server account (single sign-on) |
 
-        There is **no admin token** to copy or keep safe: the admin panel is protected by this
-        server's single sign-on. Anyone who can sign in to this server can open it, so treat it
-        as an owner-only page.
+        The admin panel opens with the same account you use to sign in to this server. Anyone who
+        can sign in can open it, so treat it as an owner-only page.
 
         Note: the admin panel does not give access to user vaults --- only the user master password does.
 
         **Signing in**
 
-        Opening the vault in a **web browser** asks for your Yundera login first, then your vault
-        master password. The **Bitwarden apps and browser extensions connect directly** and are
-        not affected --- they keep using your Vaultwarden email and master password as before.
+        Nothing changes for the vault itself: the web vault, the Bitwarden apps and the browser
+        extensions all sign in with your Vaultwarden email and master password, exactly as before.
+        Only the **admin panel** asks you to sign in to the server first.
 
         **First Steps:**
 
@@ -368,22 +379,22 @@ x-casaos:
         | 설정 | 값 |
         |------|-----|
         | 관리자 패널 | [🔗 관리자 패널](https://vaultwarden-$APP_DOMAIN/admin) |
-        | 로그인 방법 | Yundera 계정 (통합 인증) |
+        | 로그인 방법 | 서버 계정 (통합 인증) |
 
-        보관해야 할 **관리자 토큰이 없습니다**: 관리자 패널은 이 서버의 통합 인증(SSO)으로 보호됩니다.
-        이 서버에 로그인할 수 있는 사람은 누구나 열 수 있으므로 소유자 전용 페이지로 취급하세요.
+        관리자 패널은 이 서버에 로그인할 때 쓰는 계정으로 열립니다. 로그인할 수 있는 사람은 누구나
+        열 수 있으므로 소유자 전용 페이지로 취급하세요.
 
         참고: 관리자 패널로는 사용자 보관함에 접근할 수 없으며, 오직 사용자 마스터 비밀번호만으로 가능합니다.
 
         **로그인 방법**
 
-        **웹 브라우저**에서 보관함을 열면 먼저 Yundera 로그인, 그다음 보관함 마스터 비밀번호를 요청합니다.
-        **Bitwarden 앱과 브라우저 확장 프로그램은 직접 연결**되므로 영향을 받지 않으며, 기존과 같이
-        Vaultwarden 이메일과 마스터 비밀번호를 사용합니다.
+        보관함 자체는 달라지지 않습니다. 웹 보관함, Bitwarden 앱, 브라우저 확장 프로그램 모두 기존과
+        같이 Vaultwarden 이메일과 마스터 비밀번호로 로그인합니다. **관리자 패널**만 서버 로그인을
+        먼저 요청합니다.
 
         **📧 이메일 통합**
 
-        Yundera의 내장 SMTP 서비스를 사용합니다:
+        서버의 내장 SMTP 서비스를 사용합니다:
         - **비밀번호 복구 이메일**이 즉시 작동
         - **계정 알림**이 자동으로 전송
 
@@ -406,22 +417,21 @@ x-casaos:
         | 设置 | 值 |
         |------|-----|
         | 管理员面板 | [🔗 管理员面板](https://vaultwarden-$APP_DOMAIN/admin) |
-        | 登录方式 | 您的 Yundera 账户（单点登录） |
+        | 登录方式 | 您的服务器账户（单点登录） |
 
-        **没有管理员令牌**需要复制或保管：管理员面板由本服务器的单点登录保护。
-        任何能登录本服务器的人都可以打开它，请将其视为仅限所有者的页面。
+        管理员面板使用您登录本服务器的同一账户打开。任何能登录的人都可以打开它，
+        请将其视为仅限所有者的页面。
 
         注意：管理员面板无法访问用户保险库，只有用户主密码才可以。
 
         **登录方式**
 
-        在**网页浏览器**中打开保险库时，会先要求您登录 Yundera，然后输入保险库主密码。
-        **Bitwarden 应用和浏览器扩展直接连接**，不受影响 --- 它们继续使用您的 Vaultwarden
-        邮箱和主密码。
+        保险库本身没有任何变化：网页保险库、Bitwarden 应用和浏览器扩展都像以前一样，使用您的
+        Vaultwarden 邮箱和主密码登录。只有**管理员面板**会先要求您登录本服务器。
 
         **📧 邮件集成**
 
-        此版本使用Yundera内置的SMTP服务：
+        此版本使用服务器内置的SMTP服务：
         - **密码恢复邮件**立即可用
         - **账户通知**自动发送
 
@@ -444,24 +454,24 @@ x-casaos:
         | Paramètre | Valeur |
         |-----------|--------|
         | Panneau Admin | [🔗 Panneau Admin](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Connexion via | Votre compte Yundera (authentification unique) |
+        | Connexion via | Votre compte serveur (authentification unique) |
 
-        Il n'y a **aucun token admin** à copier ou à conserver : le panneau admin est protégé par
-        l'authentification unique de ce serveur. Toute personne pouvant se connecter à ce serveur
-        peut l'ouvrir --- considérez-le comme une page réservée au propriétaire.
+        Le panneau admin s'ouvre avec le compte que vous utilisez pour vous connecter à ce serveur.
+        Toute personne pouvant s'y connecter peut l'ouvrir --- considérez-le comme une page
+        réservée au propriétaire.
 
         Note : le panneau admin ne donne pas accès aux coffres-forts des utilisateurs, seul le mot de passe principal de l'utilisateur le peut.
 
         **Connexion**
 
-        Ouvrir le coffre-fort dans un **navigateur web** demande d'abord votre connexion Yundera,
-        puis votre mot de passe principal. Les **applications et extensions Bitwarden se
-        connectent directement** et ne sont pas concernées --- elles continuent d'utiliser votre
-        email Vaultwarden et votre mot de passe principal.
+        Rien ne change pour le coffre-fort lui-même : le coffre web, les applications Bitwarden et
+        les extensions de navigateur se connectent tous avec votre email Vaultwarden et votre mot
+        de passe principal, exactement comme avant. Seul le **panneau admin** demande d'abord une
+        connexion au serveur.
 
         **📧 Intégration Email**
 
-        Cette version utilise le service SMTP intégré de Yundera :
+        Cette version utilise le service SMTP intégré du serveur :
         - **Emails de récupération de mot de passe** fonctionnent immédiatement
         - **Notifications de compte** sont envoyées automatiquement
 
@@ -484,24 +494,23 @@ x-casaos:
         | Einstellung | Wert |
         |-------------|------|
         | Admin-Panel | [🔗 Admin-Panel](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Anmeldung mit | Ihrem Yundera-Konto (Single Sign-on) |
+        | Anmeldung mit | Ihrem Server-Konto (Single Sign-on) |
 
-        Es gibt **kein Admin-Token** zum Kopieren oder Aufbewahren: Das Admin-Panel wird durch das
-        Single Sign-on dieses Servers geschützt. Wer sich an diesem Server anmelden kann, kann es
-        öffnen --- behandeln Sie es als Seite nur für den Eigentümer.
+        Das Admin-Panel öffnet sich mit demselben Konto, mit dem Sie sich an diesem Server anmelden.
+        Wer sich anmelden kann, kann es öffnen --- behandeln Sie es als Seite nur für den
+        Eigentümer.
 
         Hinweis: Das Admin-Panel gewährt keinen Zugang zu Benutzer-Tresoren, nur das Benutzer-Master-Passwort kann das.
 
         **Anmeldung**
 
-        Wird der Tresor im **Webbrowser** geöffnet, fragt er zuerst nach Ihrer Yundera-Anmeldung
-        und dann nach Ihrem Master-Passwort. Die **Bitwarden-Apps und Browser-Erweiterungen
-        verbinden sich direkt** und sind nicht betroffen --- sie nutzen weiterhin Ihre
-        Vaultwarden-E-Mail und Ihr Master-Passwort.
+        Am Tresor selbst ändert sich nichts: Der Web-Tresor, die Bitwarden-Apps und die
+        Browser-Erweiterungen melden sich alle wie bisher mit Ihrer Vaultwarden-E-Mail und Ihrem
+        Master-Passwort an. Nur das **Admin-Panel** verlangt vorher eine Anmeldung am Server.
 
         **📧 E-Mail-Integration**
 
-        Diese Version nutzt den integrierten SMTP-Dienst von Yundera:
+        Diese Version nutzt den integrierten SMTP-Dienst des Servers:
         - **Passwort-Wiederherstellungs-E-Mails** funktionieren sofort
         - **Konto-Benachrichtigungen** werden automatisch gesendet
 
@@ -524,24 +533,23 @@ x-casaos:
         | Configuración | Valor |
         |---------------|-------|
         | Panel de Admin | [🔗 Panel de Admin](https://vaultwarden-$APP_DOMAIN/admin) |
-        | Iniciar sesión con | Tu cuenta de Yundera (inicio de sesión único) |
+        | Iniciar sesión con | Tu cuenta del servidor (inicio de sesión único) |
 
-        **No hay token de admin** que copiar o guardar: el panel de administración está protegido
-        por el inicio de sesión único de este servidor. Cualquiera que pueda iniciar sesión en
-        este servidor puede abrirlo --- trátalo como una página solo para el propietario.
+        El panel de administración se abre con la misma cuenta que usas para iniciar sesión en este
+        servidor. Cualquiera que pueda iniciar sesión puede abrirlo --- trátalo como una página
+        solo para el propietario.
 
         Nota: el panel de admin no da acceso a las bóvedas de usuarios, solo la contraseña maestra del usuario puede hacerlo.
 
         **Inicio de sesión**
 
-        Abrir la bóveda en un **navegador web** pide primero tu inicio de sesión de Yundera y
-        luego tu contraseña maestra. Las **aplicaciones y extensiones de Bitwarden se conectan
-        directamente** y no se ven afectadas --- siguen usando tu email de Vaultwarden y tu
-        contraseña maestra.
+        La bóveda en sí no cambia: la bóveda web, las aplicaciones de Bitwarden y las extensiones
+        de navegador inician sesión con tu email de Vaultwarden y tu contraseña maestra, igual que
+        antes. Solo el **panel de administración** pide iniciar sesión en el servidor primero.
 
         **📧 Integración de Email**
 
-        Esta versión utiliza el servicio SMTP integrado de Yundera:
+        Esta versión utiliza el servicio SMTP integrado del servidor:
         - **Emails de recuperación de contraseña** funcionan inmediatamente
         - **Notificaciones de cuenta** se envían automáticamente
 

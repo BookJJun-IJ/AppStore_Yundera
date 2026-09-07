@@ -32,7 +32,7 @@ services:
     # 80 — user-facing API backend + Web UI (CONTRIBUTING "CPU Share Allocation").
     cpu_shares: 80
 
-  # AppShield provides perimeter authentication: the Yundera SSO (OIDC) gate for the
+  # AppShield provides perimeter authentication: the SSO (OIDC) gate for the
   # Web UI, and the OAuth 2.1 broker for /mcp (machine clients). Only /webhook stays
   # exempt — Telegram's servers cannot perform any of those flows and carry their own
   # per-registration secret token instead; see rationale.md.
@@ -73,7 +73,7 @@ services:
       # Machine/API auth for the MCP endpoint. AppShield runs an OAuth/OIDC
       # authorization server fronting Dex and gates exactly the path named by the
       # resource URL (/mcp) on Bearer tokens; everything else stays behind the
-      # Yundera SSO gate. Replaces ALLOWED_PATHS: "mcp", which exempted /mcp from the
+      # SSO gate. Replaces ALLOWED_PATHS: "mcp", which exempted /mcp from the
       # gate and — with AUTH_HASH inert under Maison — left it uncredentialed, so an
       # anonymous caller could drive send_message / send_photo / get_chat_history.
       OAUTH_RESOURCE: "https://telegrammcp-${APP_DOMAIN}/mcp"
@@ -113,7 +113,6 @@ x-casaos:
   scheme: https
   port_map: "443"
   index: /
-  author: Aptero
   category: Chat
   tags: ["developer", "ai"]
   description:
@@ -173,7 +172,7 @@ x-casaos:
         2. (Optional) An MCP-compatible LLM server to forward incoming messages to — only needed if you want the bot to auto-reply
 
         **Setup (2 steps):**
-        1. Open this app's Web UI (you'll sign in with your Yundera account — no extra password)
+        1. Open this app's Web UI (you'll sign in with your server account — the same single sign-on you use for the rest of the server)
         2. Paste your **bot token**, pick **polling** or **webhook** mode, and click **Save**. In webhook mode the bot registers `https://telegrammcp-${APP_DOMAIN}/webhook` with Telegram automatically.
 
         **MCP Integration (for AI/LLMs):**
@@ -183,7 +182,7 @@ x-casaos:
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
         URL below — clients that support OAuth discovery (claude.ai, Claude
         Desktop) register themselves and open a browser for you to approve with
-        your Yundera login.
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {
@@ -228,7 +227,7 @@ x-casaos:
 
         **Security:**
         - The bot token is stored only in `/DATA/AppData/telegrammcp/config.json` on this server and is never logged or returned via the API
-        - The Web UI is protected by your Yundera single sign-on — no extra login needed
+        - The Web UI is protected by the server's single sign-on — the session you already have covers it
         - `/mcp` is gated separately on OAuth 2.1 Bearer tokens, so nothing on the
           public URL is reachable without a credential. Only the in-network address
           `http://telegrammcp-backend:9634/mcp` (Option 2) is unauthenticated, and it

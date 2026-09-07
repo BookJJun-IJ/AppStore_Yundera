@@ -192,7 +192,6 @@ x-casaos:
   port_map: "443"
   hostname: odysseus-${APP_DOMAIN}
   is_uncontrolled: false
-  author: Yundera Team
   developer: Odysseus
   category: Chat
   tags: ["ai", "productivity", "automation"]

@@ -49,7 +49,6 @@ x-casaos:
     - arm64
   main: uptimekuma
   webui_port: 80
-  author: Yundera Team
   category: Utilities
   developer: Louis Lam
   store_app_id: uptimekuma

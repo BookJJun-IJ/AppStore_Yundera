@@ -74,7 +74,6 @@ x-casaos:
     - arm64
     - arm
   main: dufs
-  author: Yundera Team
   category: Cloud
   tags: ["files", "personal"]
   description:

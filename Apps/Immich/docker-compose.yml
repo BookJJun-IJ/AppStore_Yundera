@@ -141,12 +141,12 @@ x-casaos:
 
       Unlike other platforms, Immich runs on your own private server. That means:
 
-      * **Unlimited storage** - You can upgrade the storage anytime at market price on your Yundera interface
+      * **Unlimited storage** - You can upgrade the storage anytime at market price on your server interface
       * **No data mining**
       * **Lightning-fast access on your local network**
       * **Multi-user support**, so everyone in your home has their own space
 
-      Perfect for photographers, families, or anyone who wants to take back control of their memories. Immich works beautifully on your Yundera Personal Cloud Server, so your media stays **yours : forever**.
+      Perfect for photographers, families, or anyone who wants to take back control of their memories. Immich works beautifully on your Personal Cloud Server, so your media stays **yours : forever**.
     fr_fr: |
       Immich vous offre une galerie moderne de photos et vidéos auto-hébergée, sans les limites ou le suivi des services cloud traditionnels.
 
@@ -154,12 +154,12 @@ x-casaos:
 
       Contrairement aux autres plateformes, Immich fonctionne sur votre propre serveur privé. Cela signifie :
 
-      * **Stockage illimité** - Vous pouvez mettre à niveau le stockage à tout moment au prix du marché sur votre interface Yundera
+      * **Stockage illimité** - Vous pouvez mettre à niveau le stockage à tout moment au prix du marché sur l'interface de votre serveur
       * **Aucune exploitation de données**
       * **Accès ultra-rapide sur votre réseau local**
       * **Support multi-utilisateur**, pour que chacun dans votre foyer ait son propre espace
 
-      Parfait pour les photographes, les familles, ou quiconque veut reprendre le contrôle de ses souvenirs. Immich fonctionne parfaitement sur votre serveur cloud personnel Yundera, ainsi vos médias restent **les vôtres : pour toujours**.
+      Parfait pour les photographes, les familles, ou quiconque veut reprendre le contrôle de ses souvenirs. Immich fonctionne parfaitement sur votre serveur cloud personnel, ainsi vos médias restent **les vôtres : pour toujours**.
   tagline:
     en_us: Your Private Photo Library, Fully Under Your Control
     fr_fr: Votre bibliothèque photo privée, entièrement sous votre contrôle

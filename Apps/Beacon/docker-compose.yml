@@ -126,7 +126,6 @@ x-casaos:
 
   architectures:
     - amd64
-  author: Yundera
   category: Developer
   tags: ["developer"]
   developer: Worph
@@ -176,10 +175,10 @@ x-casaos:
         Beacon automatically discovers MCP servers on the `pcs` Docker network.
 
         **Authentication (on by default):**
-        - **Humans** — the web dashboard is behind your Yundera single sign-on. Opening the
-          app redirects you to the Yundera login; there is no separate Beacon password.
+        - **Humans** — the web dashboard is behind the server's single sign-on. Opening the
+          app redirects you to your server login; you sign in with your server account.
         - **Machines** — the `/mcp` endpoint is behind OAuth 2.1. AI clients get a token by
-          logging in with the same Yundera account (see Option 1 below).
+          logging in with the same server account (see Option 1 below).
 
         Nothing is reachable unauthenticated from the public URL.
 
@@ -197,7 +196,7 @@ x-casaos:
 
         The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the URL below —
         clients that support OAuth discovery (claude.ai, Claude Desktop) register themselves
-        and open a browser for you to approve with your Yundera login.
+        and open a browser for you to approve with your server login.
         ```json
         {
           "mcpServers": {
@@ -248,11 +247,11 @@ x-casaos:
         Beacon decouvre automatiquement les serveurs MCP sur le reseau Docker `pcs`.
 
         **Authentification (active par defaut):**
-        - **Humains** — le tableau de bord web est protege par votre authentification unique
-          Yundera (SSO). Ouvrir l'application redirige vers la connexion Yundera; il n'y a pas
-          de mot de passe Beacon separe.
+        - **Humains** — le tableau de bord web est protege par l'authentification unique
+          de votre serveur (SSO). Ouvrir l'application redirige vers la connexion de votre
+          serveur; vous vous connectez avec votre compte serveur.
         - **Machines** — l'endpoint `/mcp` est protege par OAuth 2.1. Les clients IA obtiennent
-          un jeton en se connectant avec le meme compte Yundera (voir Option 1 ci-dessous).
+          un jeton en se connectant avec le meme compte serveur (voir Option 1 ci-dessous).
 
         Rien n'est accessible sans authentification depuis l'URL publique.
 
@@ -270,8 +269,8 @@ x-casaos:
 
         L'endpoint `/mcp` est protege par OAuth 2.1. Pointez votre client vers l'URL
         ci-dessous — les clients qui gerent la decouverte OAuth (claude.ai, Claude Desktop)
-        s'enregistrent seuls et ouvrent un navigateur pour que vous approuviez avec votre
-        connexion Yundera.
+        s'enregistrent seuls et ouvrent un navigateur pour que vous approuviez avec la
+        connexion de votre serveur.
         ```json
         {
           "mcpServers": {
