@@ -58,7 +58,13 @@ services:
       caddy_2.1_handle.reverse_proxy: "{{upstreams 80}}"
     networks:
       - pcs
-    # Uncomment the ports section if you want to expose the service on specific ports
+    # BitTorrent peer + DHT traffic on 6881 (matching TORRENTING_PORT below). Not
+    # HTTP, so Caddy cannot carry it — reaching it means publishing it to the host.
+    # Shipped commented out because the client is usable without it: qBittorrent
+    # still dials out to peers, so downloads work. Uncomment to also accept incoming
+    # peers, which is faster and is what seeding needs; that makes 6881 reachable
+    # from the internet with no authentication in front of it. Called out in
+    # tips.before_install so the user knows what this buys before installing.
     #ports:
     #  - 6881:6881
     #  - 6881:6881/udp
@@ -89,6 +95,10 @@ x-casaos:
         Login : `admin`
         Password : `$APP_DEFAULT_PASSWORD`
         The download directory is `/DATA/Downloads`
+        qBittorrent dials out to peers on its own, so downloads work as installed.
+        To also accept incoming peer connections — usually faster, and what seeding
+        needs — uncomment the `ports:` block in the compose file. That publishes port
+        `6881` (TCP and UDP) to the internet, reachable without authentication.
         $APP_DEFAULT_PASSWORD
   architectures:
     - amd64
