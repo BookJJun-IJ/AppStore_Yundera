@@ -5,7 +5,8 @@
 1. The app authenticates with its own Django login rather than being fronted by the
    AppShield SSO sidecar.
 2. Two services run as `user: 0:0` — the nginx front-end and PostgreSQL.
-3. The app is shipped without upstream's `powersync` service.
+3. PostgreSQL is started with `wal_level=logical` so the PowerSync service can
+   replicate from it.
 
 ## Why it is necessary
 
@@ -39,15 +40,31 @@ enabled, as upstream ships it.
 The application containers (`wger-web`, `wger-worker`, `wger-beat`) run unprivileged as
 `$PUID:$PGID`, which is also the uid the image's own `wger` user has.
 
-**3. No `powersync`.** Upstream's compose includes `journeyapps/powersync-service`,
-which backs *offline* mode in the phone app. It needs a second PostgreSQL role, logical
-replication on the database, its own config tree and roughly another half-gigabyte of
-memory. The phone app authenticates and syncs against the REST API without it — which
-is why the JWT signing keypair is still generated (see below) — so the cost did not
-look proportionate for a single-user server. Upstream's `config/nginx.conf` declares
-`powersync` as an nginx `upstream`, and nginx exits at startup on an upstream it cannot
-resolve, so the shipped `seed/config/nginx.conf` has that block removed rather than
-merely unused.
+**3. `wal_level=logical` on the database.** The `wger-powersync` service is what the
+phone app syncs through, and it reads the database over a logical replication slot. The
+image default, `wal_level=replica`, cannot feed one, and the setting only takes effect
+on a restart, so it is a `command:` override on the postgres service rather than
+something a running app can turn on.
+
+This service is not optional, though an earlier revision of this app shipped without it
+on the belief that the phone app falls back to the REST API. It does not: the Flutter
+client has been offline-first on PowerSync since 2.0.3, and this server's
+`MIN_APP_VERSION` is 2.1.0, so *every* app version it will talk to needs it. Without the
+service the app logs in and then sits on "Sync Service Unreachable", because
+`/api/v2/powersync-token` hands it `SITE_URL` + `/ps/` and nothing answers there. The web
+UI is unaffected either way — it contains no reference to PowerSync at all.
+
+The cost is one more container (118 MB image, a 512M limit) and a second database role.
+Most of what made it look expensive is now done by the app itself: the replication
+publication is created by wger's own core migration 0027, and the storage role and
+schema by its `setup-powersync-storage` management command, which the
+`setup-powersync-storage` init step runs.
+
+The one genuinely new operational risk is the replication slot: an inactive slot pins
+WAL, and on a personal server where a container can sit stopped for a week that fills
+`/DATA`. `max_slot_wal_keep_size=1GB` caps it — past that postgres invalidates the slot
+and PowerSync takes a fresh snapshot, which costs the phone a resync rather than any
+data. Upstream's compose sets no such cap.
 
 ## Security mitigations in place
 
@@ -56,8 +73,14 @@ merely unused.
   from any other app on the box.
 - No host port is published by any service.
 - Every credential is generated per deployment: `WGER_SECRET_KEY` and
-  `WGER_DB_PASSWORD` through `x-compose-app.secrets`, the JWT signing keypair through
-  the `pre_install` hook, and the admin password from `$APP_DEFAULT_PASSWORD`.
+  `WGER_DB_PASSWORD` and `WGER_PS_STORAGE_PASSWORD` through `x-compose-app.secrets`, the
+  JWT signing keypair through the `pre_install` hook, and the admin password from
+  `$APP_DEFAULT_PASSWORD`.
+- `PS_STORAGE_PG_URI` is set explicitly rather than left to the app's default, which is
+  the literal `postgres://powersync_storage:powersync_password@db:5432/wger` — inheriting
+  it would give the deployment a database role whose password is published upstream.
+  PowerSync's role owns only its own sync-bucket schema; it is not the app's database
+  user.
 - wger seeds its first admin from a fixture as `admin` / `adminadmin` — a published
   upstream default — with no environment variable to change it. The
   `rotate-admin-password` init step replaces it once the app is up, and only when the
@@ -66,10 +89,23 @@ merely unused.
   so it never contributes to a `django-axes` lockout.
 - Both nginx mounts (`static`, `media`) are read-only, and nothing outside
   `/DATA/AppData/wger` is mounted into any container.
-- Resource limits are set on all six services (64M … 1G, ~2.6G in total).
+- Resource limits are set on all seven services (64M … 1G, ~3.1G in total).
+- `wger-powersync` is on the app-private bridge only. The phone reaches it through
+  nginx's `/ps/` route, on the same host and certificate as the app, and it accepts only
+  tokens signed by the app's own JWT key (`client_auth.audience: powersync`).
 
 ## Alternatives considered and rejected
 
+- **Keeping the app PowerSync-free and documenting the gap.** Rejected: it is not a
+  missing extra but the phone app's only sync path, and the failure is a red banner
+  immediately after login rather than a feature quietly absent.
+- **A dedicated PostgreSQL instance for PowerSync's bucket storage**, as some PowerSync
+  deployments run. Rejected: it stores sync state, not user data, and upstream keeps it
+  in a schema of the same database — a second postgres container would cost more memory
+  than the service it serves.
+- **Splitting PowerSync into separate `api` and `sync` containers**, which upstream
+  documents. Rejected: that split is for scaling out, and one person's training log does
+  not need it; `-r unified` runs both in one process.
 - **AppShield in front of the whole app.** Rejected: two logins for one person, for
   the reason above. AppShield 3.x no longer collides with an app's own `/login`, so
   this is a usability call rather than a technical block.
@@ -117,7 +153,8 @@ merely unused.
 
 All state is under `/DATA/AppData/wger/` — `pgdata` (the database), `media` (uploaded
 and downloaded exercise images and videos), `static` (regenerated on every start),
-`redis` (cache and queue) and `beat` (the celery schedule) — so it survives uninstall
+`redis` (cache and queue), `beat` (the celery schedule) and `config-powersync` (the sync
+service's config) — so it survives uninstall
 with "keep user data" and reinstall. The database password and Django secret key are
 generated once into the app's `.env` and never regenerated, so an existing database
 keeps opening and existing sessions keep working across restarts, updates and restores.

@@ -72,6 +72,10 @@ services:
       # nip.io and sslip.io routes serve their own assets rather than the
       # gateway's.
       SITE_URL: https://wger-${APP_DOMAIN}
+      # What /api/v2/powersync-token hands the phone app: SITE_URL + this path.
+      # It is also the app's own default; set here so a change upstream cannot
+      # silently point every phone at a path nginx does not route.
+      POWERSYNC_URL_PATH: ps
       CSRF_TRUSTED_ORIGINS: https://wger-${APP_DOMAIN},https://wger-${APP_PUBLIC_IP_DASH}.nip.io,https://wger-${APP_PUBLIC_IP_DASH}.sslip.io
       # Set because the app really is behind a TLS-terminating proxy; without
       # them Django builds http:// links and rejects its own POST forms.
@@ -198,6 +202,22 @@ services:
       POSTGRES_DB: wger
       POSTGRES_USER: wger
       POSTGRES_PASSWORD: ${WGER_DB_PASSWORD}
+    # wal_level=logical is what PowerSync's replication slot needs; the image's
+    # default `replica` cannot feed one, and the setting only takes effect on a
+    # restart, so it belongs here rather than in a runtime ALTER SYSTEM.
+    #
+    # max_slot_wal_keep_size caps what an idle slot may pin. A stopped or broken
+    # PowerSync would otherwise hold WAL indefinitely and fill /DATA -- a way to
+    # lose a server that upstream's compose leaves open. Past the cap postgres
+    # invalidates the slot instead, which costs PowerSync a fresh snapshot and
+    # the phone a resync. That is a wait, not data loss: every row still lives
+    # in the tables this is replicating from.
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_slot_wal_keep_size=1GB
     volumes:
       - ${DATA_ROOT:-/DATA}/AppData/$AppID/pgdata/:/var/lib/postgresql/data
     healthcheck:
@@ -249,6 +269,70 @@ services:
       resources:
         limits:
           memory: 256M
+
+  # The phone app's offline sync. Not an optional extra: the Flutter client has
+  # been offline-first since 2.0.3 and has no REST fallback, so an install
+  # without this service lets the app log in and then leaves it on "Sync Service
+  # Unreachable" with nothing syncing. The web UI does not use it at all.
+  #
+  # It reads the wger database through the `powersync` publication that wger's
+  # own core migration 0027 declares, and keeps its sync buckets in a schema of
+  # that same database under a separate role, created by the
+  # setup-powersync-storage init step below. Its config is two files in
+  # config-powersync/, re-rendered on every up so an app update ships new sync
+  # rules rather than leaving stale ones in place.
+  wger-powersync:
+    image: docker.io/journeyapps/powersync-service:1.26.0
+    container_name: wger-powersync
+    restart: unless-stopped
+    # API server and replication worker in one process. Upstream splits them
+    # only for horizontal scaling, which one person's training log does not
+    # need, and two containers would double the idle memory.
+    command: ["start", "-r", "unified"]
+    environment:
+      TZ: $TZ
+      POWERSYNC_CONFIG_PATH: /config/powersync.yaml
+      PS_PORT: "8080"
+      PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+      # Never left to the app's default. wger ships a *literal* fallback for
+      # this -- user powersync_storage, password powersync_password -- and a
+      # deployment that inherits it has a published database credential.
+      PS_STORAGE_PG_URI: postgres://powersync_storage:${WGER_PS_STORAGE_PASSWORD}@wger-db:5432/wger
+      # The public half of the RSA keypair the pre_install hook generated. The
+      # app asks wger for a token and PowerSync verifies it against this.
+      PS_JWKS_URL: http://wger-web:8000/api/v2/powersync-keys
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/config-powersync/:/config:ro
+    expose:
+      - 8080
+    depends_on:
+      wger-db:
+        condition: service_healthy
+    healthcheck:
+      # node and nothing else: this image carries no wget, no curl and no shell
+      # utilities worth relying on. Node 18+ has fetch built in.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/probes/liveness').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # On a first install the storage role does not exist until the post_up
+      # step has run, and that waits on the app's own first boot, so this
+      # container restarts a few times before it settles. Restarting is the
+      # intended behaviour there, not a failure to report on the tile.
+      start_period: 600s
+    networks:
+      # App-private only. The phone reaches it through nginx's /ps/ route, which
+      # is the same host and certificate as the app itself.
+      - wger-internal
+    cpu_shares: 30
+    deploy:
+      resources:
+        limits:
+          # Measured at ~115 MB with the whole exercise database replicated and
+          # one user synced. The headroom is for the ingredient tables, which
+          # this store leaves out of the default install but the tips explain
+          # how to turn on -- that import is what makes this dataset large.
+          memory: 512M
 
   # Runs the exercise/ingredient syncs and the API cache warm-up off the request
   # path. Shares the media mount because the image downloads land there.
@@ -651,6 +735,9 @@ x-compose-app:
     - path: /DATA/AppData/$AppID/config
       user: $PUID
       group: $PGID
+    - path: /DATA/AppData/$AppID/config-powersync
+      user: $PUID
+      group: $PGID
     - path: /DATA/AppData/$AppID/pgdata
       user: $PUID
       group: $PGID
@@ -674,7 +761,82 @@ x-compose-app:
     # where a generator emitting `@`, `/` or `:` would produce a URL that parses
     # into the wrong host.
     WGER_DB_PASSWORD: alnum:32
+    # PowerSync's own database role, kept separate from the app's: it owns only
+    # the sync-bucket schema and reads the tables through a replication slot.
+    # Alphanumeric for the same reason as the one above -- it is substituted
+    # into a postgres:// URL.
+    WGER_PS_STORAGE_PASSWORD: alnum:32
+  files:
+    # These three are declared rather than left to the seed tree, which is
+    # create-if-absent: an app update that changes nginx's routing or the sync
+    # rules has to reach an install that already has the old files on disk.
+    # Nothing in them is meant to be hand-edited, and the sync rules in
+    # particular must match the server image's `powersync` publication -- a
+    # stale copy is a client that silently syncs the wrong table set.
+    - path: /DATA/AppData/$AppID/config/nginx.conf
+      from: config/nginx.conf
+      ensure: always
+      mode: "0644"
+    - path: /DATA/AppData/$AppID/config-powersync/powersync.yaml
+      from: config-powersync/powersync.yaml
+      ensure: always
+      mode: "0644"
+    - path: /DATA/AppData/$AppID/config-powersync/sync_rules.yaml
+      from: config-powersync/sync_rules.yaml
+      ensure: always
+      mode: "0644"
   init:
+    # PowerSync keeps its sync buckets in a schema of the wger database, owned
+    # by a role of its own. wger ships the command that creates both; it reads
+    # PS_STORAGE_PG_URI, creates or updates the role and schema to match, and
+    # no-ops when that variable is unset or the database is not postgres.
+    #
+    # `always`, not `once`: it costs one short container per up, and the two
+    # states it repairs -- a database restored without the role, or a role whose
+    # password no longer matches the generated secret -- would otherwise leave
+    # PowerSync unable to start with nothing left to re-run. The retry loop
+    # covers the gap between `up` returning and postgres accepting connections.
+    - name: setup-powersync-storage
+      image: docker.io/wger/server:2.7.0
+      phase: post_up
+      network: wger-internal
+      when: always
+      user: $PUID:$PGID
+      environment:
+        PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+        PS_STORAGE_PG_URI: postgres://powersync_storage:${WGER_PS_STORAGE_PASSWORD}@wger-db:5432/wger
+        SECRET_KEY: ${WGER_SECRET_KEY}
+        DJANGO_DEBUG: "False"
+      entrypoint:
+        - /bin/sh
+      command:
+        - -c
+        - |
+          exec python3 - <<'PY'
+          import sys
+          import time
+
+          import django
+
+          django.setup()
+
+          from django.core.management import call_command
+          from django.db import connections
+
+          last = None
+          for _ in range(30):
+              try:
+                  call_command('setup-powersync-storage')
+                  sys.exit(0)
+              except Exception as exc:
+                  # Almost always postgres not accepting connections yet.
+                  last = exc
+                  connections.close_all()
+                  time.sleep(5)
+
+          sys.exit('wger: could not set up the PowerSync storage role: {}'.format(last))
+          PY
+
     # Three jobs the app needs done once, at the start, rather than whenever its
     # weekly schedule happens to fire: refresh the exercise database from
     # WGER_INSTANCE, download the pictures for it, and warm the exercise API
