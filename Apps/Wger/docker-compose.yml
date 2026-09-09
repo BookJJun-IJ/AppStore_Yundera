@@ -212,6 +212,16 @@ services:
     # invalidates the slot instead, which costs PowerSync a fresh snapshot and
     # the phone a resync. That is a wait, not data loss: every row still lives
     # in the tables this is replicating from.
+    #
+    # Once the slot exists this line is load-bearing for *startup*, not just for
+    # sync: postgres refuses to boot at all against a pgdata holding a logical
+    # slot when wal_level is lower -- "FATAL: logical replication slot ...
+    # exists, but wal_level < logical", then "aborting startup". So dropping the
+    # flag, or rolling this app back to a revision from before PowerSync, takes
+    # the whole app down rather than degrading it, and every service waiting on
+    # the db healthcheck sits in Created. The fix is to put the flag back; the
+    # slot then resumes where it left off. Dropping the slot instead costs a
+    # fresh snapshot and needs wal_level=logical to start postgres anyway.
     command:
       - postgres
       - -c
@@ -240,6 +250,15 @@ services:
     image: redis:8.2.9-alpine
     container_name: wger-cache
     restart: unless-stopped
+    # The image's entrypoint would drop to its own `redis` user (uid 999), but
+    # the /data bind below is created by `folders:` as $PUID:$PGID. Redis would
+    # then fail every background save with "Failed opening the temp RDB file
+    # ... Permission denied", and because stop-writes-on-bgsave-error defaults
+    # to yes it starts refusing writes: celery loses its broker with "MISCONF
+    # Redis is configured to save RDB snapshots, but is currently not able to
+    # persist on disk" and the worker healthcheck fails. Nothing here needs
+    # root, so run as the same uid that owns the directory.
+    user: "$PUID:$PGID"
     environment:
       TZ: $TZ
     # `volatile-lru` and not `allkeys-*`: db 1 holds the Django cache, whose

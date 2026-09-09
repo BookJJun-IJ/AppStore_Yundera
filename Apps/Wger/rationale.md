@@ -66,6 +66,17 @@ WAL, and on a personal server where a container can sit stopped for a week that 
 and PowerSync takes a fresh snapshot, which costs the phone a resync rather than any
 data. Upstream's compose sets no such cap.
 
+The slot also makes the flag load-bearing for *startup*, which is worth knowing before
+anyone edits this service. Postgres will not boot against a data directory holding a
+logical slot if `wal_level` is lower than `logical` — it logs `FATAL: logical
+replication slot ... exists, but wal_level < logical` and aborts. Removing the flag, or
+rolling the app back to a revision from before PowerSync, therefore takes the whole app
+down rather than only its sync: the database restart-loops and every service gated on
+its healthcheck stays in `Created`. Recovery is to restore the flag, at which point the
+slot resumes from where it stopped; deleting the slot is both lossier and needs
+`wal_level=logical` to start postgres in the first place. Observed on a test server on
+2026-09-08, from a store render that predated the PowerSync revision.
+
 ## Security mitigations in place
 
 - Only the nginx front-end is on the shared `pcs` network. The application, database,
