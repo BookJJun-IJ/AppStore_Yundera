@@ -2,8 +2,13 @@ name: terminal
 
 services:
   terminal:
-    image: ghcr.io/yundera/nginx-hash-lock:1.0.5
+    image: ghcr.io/yundera/appshield:3.0.2
     container_name: terminal
+    # OIDC identity: the AppShield auth-service builds its OIDC redirect URIs from
+    # os.hostname(), and the auth-registrar independently attests this app's name via the
+    # container's PTR record, rejecting any redirect URI that doesn't match. Must equal the
+    # app name, or Docker defaults the hostname to the random container ID and OIDC registration fails.
+    hostname: terminal
     restart: unless-stopped
     expose:
       - "80"
@@ -18,22 +23,21 @@ services:
       caddy_2.reverse_proxy: "{{upstreams 80}}"
     user: "0:0"
     environment:
-      AUTH_HASH: $AUTH_HASH
-      BACKEND_HOST: "ttyd"
+      BACKEND_HOST: "terminal-ttyd"
       BACKEND_PORT: "7681"
       LISTEN_PORT: "80"
-      USER: "ADMIN"
-      PASSWORD: $APP_DEFAULT_PASSWORD
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
     depends_on:
-      - ttyd
+      - terminal-ttyd
     networks:
+      # On `pcs` because Caddy must reach it, and on the app's own
+      # network because that is where its backend lives.
       - pcs
-    privileged: true
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+      - terminal-internal
+    cpu_shares: 80
 
-  ttyd:
+  terminal-ttyd:
     image: tsl0922/ttyd:1.7.7
     container_name: terminaltty
     restart: unless-stopped
@@ -44,7 +48,12 @@ services:
         source: /
         target: /host
     networks:
-      - pcs
+      # App-private: reached only by this app's own services, so it
+      # has no business on the shared network.
+      - terminal-internal
+    cpu_shares: 70
+    # Full host privilege: this app IS a root shell on the host filesystem.
+    # See rationale.md.
     privileged: true
     cap_add:
       - SYS_ADMIN
@@ -52,28 +61,51 @@ services:
 
 networks:
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
+  # App-private link between this app's own services.
+  terminal-internal:
+    driver: bridge
 
 x-casaos:
   architectures:
     - amd64
     - arm64
   main: terminal
-  author: yundera
-  developer: yundera
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Terminal/icon.png
+  icon: icon.png
+  thumbnail: thumbnail.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Terminal/screenshot-1.png
+    - screenshot-1.png
   tagline:
-    en_us: "Secure hash-locked terminal access"
+    en_us: "Root shell on your server, in the browser"
   category: Utilities
+  tags: ["developer"]
   description:
-    en_us: "A secure terminal with hash-based authentication using nginxhashlock"
+    en_us: |
+      Terminal gives you a full root shell on your Personal Cloud Server from any browser, using ttyd.
+
+      This is an administration tool, and it is not sandboxed. The session opens as **root on the host filesystem** (the host root `/` is mounted read-write and the shell chroots into it), so it can read and modify everything on the server: `/DATA/Documents`, `/DATA/Downloads`, `/DATA/Media`, `/DATA/Gallery`, every other app's data under `/DATA/AppData`, and the system files outside `/DATA`. Anything you could do over SSH as root, this app can do.
+
+      Access is protected by the server's single sign-on: the terminal sits behind the AppShield gate, which registers with the PCS OIDC provider, so only your logged-in server account reaches the shell. You sign in with that same account instead of setting a separate app password.
+
+      Install it only on a PCS you administer yourself. See rationale.md for the full privilege and mitigation write-up.
   title:
     en_us: "Terminal"
+  tips:
+    before_install:
+      en_us: |
+        **This app is a root shell on your server.**
+
+        - It mounts the host root `/` read-write and opens the session as `root`, so it can read and change **every** file on the PCS — all of `/DATA` (Documents, Downloads, Media, Gallery, and every other app's data) as well as system files outside `/DATA`.
+        - The container runs `privileged`, which is what makes host administration tasks work.
+        - Access is gated by the server's single sign-on (AppShield OIDC) — sign in with your server account, the same login you already use for the server.
+
+        Treat access to this app as equivalent to root SSH access to the server. If you only need to browse or edit files, install **FileBrowser** instead.
   store_app_id: terminal
   is_uncontrolled: false
-  # nginxhashlock handles the hash validation automatically
-  index: /?hash=$AUTH_HASH
+  index: /
   webui_port: 80
+
+x-compose-app:
+  webui-host: terminal-${domain}
+  webui-path: "/"

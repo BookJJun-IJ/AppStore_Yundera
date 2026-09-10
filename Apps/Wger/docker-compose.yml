@@ -1,0 +1,1029 @@
+name: wger
+
+services:
+  # The public face of the app. Django with DEBUG=False serves neither /static/
+  # nor /media/, and wger ships no whitenoise, so a front-end that can serve
+  # files is required for the app to render at all -- upstream says the same.
+  # It is therefore also `x-casaos.main`: the service carrying the caddy labels.
+  wger:
+    image: nginx:1.29.3-alpine
+    container_name: wger
+    # nginx's master process writes /var/run/nginx.pid and /var/cache/nginx,
+    # neither of which is writable by an unprivileged uid in this image; the
+    # workers drop to `nginx` on their own. Both wger mounts below are read-only
+    # and nothing outside /DATA/AppData/wger is reachable. See rationale.md.
+    user: "0:0"
+    restart: unless-stopped
+    expose:
+      - 80
+    labels:
+      caddy_0: wger-${APP_DOMAIN}
+      caddy_0.import: gateway_tls
+      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_1: wger-${APP_PUBLIC_IP_DASH}.nip.io
+      caddy_1.import: gateway_tls
+      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_2: wger-${APP_PUBLIC_IP_DASH}.sslip.io
+      caddy_2.reverse_proxy: "{{upstreams 80}}"
+    environment:
+      TZ: $TZ
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/config/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/static/:/wger/static:ro
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/media/:/wger/media:ro
+    depends_on:
+      wger-web:
+        condition: service_started
+    healthcheck:
+      # Deliberately proxied through to the app rather than answered by nginx:
+      # the tile's health follows this service, and nginx being up while
+      # gunicorn is still migrating is not the app being up. The first boot
+      # loads fixtures, migrates and runs collectstatic over ~11k files, which
+      # took about four minutes on a small server -- hence the long start_period.
+      # Later starts take about a minute.
+      # 127.0.0.1 and not `localhost`: busybox wget resolves localhost to ::1
+      # first, and `listen 80` binds IPv4 only, so the check would fail forever
+      # and the app's tile would never go green.
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "-O", "/dev/null", "http://127.0.0.1/api/v2/version/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    networks:
+      - pcs
+      - wger-internal
+    cpu_shares: 80
+    deploy:
+      resources:
+        limits:
+          memory: 64M
+
+  # The application itself: Django under gunicorn.
+  wger-web:
+    image: docker.io/wger/server:2.7.0
+    container_name: wger-web
+    restart: unless-stopped
+    environment:
+      TZ: $TZ
+      TIME_ZONE: $TZ
+
+      # Deployment identity. SITE_URL is what the app writes into absolute links
+      # (emails, the API's image URLs); MEDIA_URL/STATIC_URL stay relative so the
+      # nip.io and sslip.io routes serve their own assets rather than the
+      # gateway's.
+      SITE_URL: https://wger-${APP_DOMAIN}
+      # What /api/v2/powersync-token hands the phone app: SITE_URL + this path.
+      # It is also the app's own default; set here so a change upstream cannot
+      # silently point every phone at a path nginx does not route.
+      POWERSYNC_URL_PATH: ps
+      CSRF_TRUSTED_ORIGINS: https://wger-${APP_DOMAIN},https://wger-${APP_PUBLIC_IP_DASH}.nip.io,https://wger-${APP_PUBLIC_IP_DASH}.sslip.io
+      # Set because the app really is behind a TLS-terminating proxy; without
+      # them Django builds http:// links and rejects its own POST forms.
+      X_FORWARDED_PROTO_HEADER_SET: "True"
+      USE_X_FORWARDED_HOST: "True"
+
+      # Generated once by x-compose-app.secrets. Left unset the app generates a
+      # fresh key on every start and logs everyone out on every restart.
+      SECRET_KEY: ${WGER_SECRET_KEY}
+      # Written into the app's .env on install by the pre_install hook below --
+      # an RSA keypair no `secrets:` generator can produce.
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+
+      # Database. wger reads a whole URL from PS_DATABASE_URI, or nothing at
+      # all: DJANGO_DB_ENGINE has no default and the app refuses to start
+      # without one of the two.
+      PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+      DJANGO_PERFORM_MIGRATIONS: "True"
+
+      # Cache and queue.
+      DJANGO_CACHE_BACKEND: django_redis.cache.RedisCache
+      DJANGO_CACHE_LOCATION: redis://wger-cache:6379/1
+      DJANGO_CACHE_CLIENT_CLASS: django_redis.client.DefaultClient
+      DJANGO_CACHE_TIMEOUT: "1296000"
+      USE_CELERY: "True"
+      CELERY_BROKER: redis://wger-cache:6379/2
+      CELERY_BACKEND: redis://wger-cache:6379/2
+
+      # Accounts. Registration is off so the app is not an open sign-up form on
+      # a public URL; the admin adds people from the app's own user management.
+      # Guest users would let an unauthenticated visitor get a working session,
+      # which is the same hole by another route -- and the app's default is on.
+      ALLOW_REGISTRATION: "False"
+      ALLOW_GUEST_USERS: "False"
+      USE_RECAPTCHA: "False"
+      AXES_ENABLED: "True"
+      AXES_FAILURE_LIMIT: "10"
+      AXES_COOLOFF_TIME: "30"
+      AXES_HANDLER: axes.handlers.cache.AxesCacheHandler
+      AXES_LOCKOUT_PARAMETERS: ip_address
+      AXES_IPWARE_PROXY_COUNT: "1"
+      AXES_IPWARE_META_PRECEDENCE_ORDER: HTTP_X_FORWARDED_FOR,REMOTE_ADDR
+      NUMBER_OF_PROXIES: "1"
+
+      # Content. The exercise database is what makes the app usable on day one,
+      # and it lives on wger.de, not in the image.
+      #
+      # SYNC_EXERCISES_ON_STARTUP is off even so. It is the app's own way of
+      # fetching that database, but it runs inside this container's entrypoint,
+      # ahead of gunicorn, on *every* start -- measured at ~5 minutes of downtime
+      # per restart against wger.de, and it is not a first-boot cost: the sync
+      # re-walks every exercise each time. The same work is queued onto celery
+      # once, at install, by the seed-exercise-database step below, which leaves
+      # the app answering while it runs. From then on the weekly celery job keeps
+      # it current.
+      #
+      # The two bulk jobs are deliberately off: the ingredient dump is a
+      # multi-hundred-megabyte import and the exercise videos are larger still,
+      # neither of which belongs in a default install of a personal server. The
+      # barcode scanner still works -- DOWNLOAD_INGREDIENTS_FROM fetches a
+      # product on demand when it is scanned. Both are listed in the tips.
+      WGER_INSTANCE: https://wger.de
+      SYNC_EXERCISES_ON_STARTUP: "False"
+      SYNC_EXERCISES_CELERY: "True"
+      SYNC_EXERCISE_IMAGES_CELERY: "True"
+      SYNC_EXERCISE_VIDEOS_CELERY: "False"
+      SYNC_INGREDIENTS_CELERY: "False"
+      DOWNLOAD_INGREDIENTS_FROM: WGER
+      CACHE_API_EXERCISES_CELERY: "True"
+      ALLOW_UPLOAD_VIDEOS: "True"
+      MIN_ACCOUNT_AGE_TO_TRUST: "21"
+
+      DJANGO_DEBUG: "False"
+      LOG_LEVEL_PYTHON: WARNING
+      WGER_USE_GUNICORN: "True"
+      WGER_PORT: "8000"
+      DJANGO_COLLECTSTATIC_ON_STARTUP: "True"
+      EXPOSE_PROMETHEUS_METRICS: "False"
+      FROM_EMAIL: wger <${APP_EMAIL}>
+      # Two workers rather than upstream's three: this runs beside a database, a
+      # cache and two celery processes on a single small server.
+      GUNICORN_CMD_ARGS: "--workers 2 --threads 2 --worker-class gthread --timeout 240"
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/static/:/home/wger/static
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/media/:/home/wger/media
+    expose:
+      - 8000
+    # Let gunicorn finish in-flight requests instead of cutting uploads short.
+    stop_grace_period: 60s
+    depends_on:
+      wger-db:
+        condition: service_healthy
+      wger-cache:
+        condition: service_healthy
+    healthcheck:
+      # python3 rather than the wget upstream uses: it is the one interpreter
+      # this image is guaranteed to have.
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/v2/version/', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 600s
+    networks:
+      # App-private only. Everything from outside arrives through the nginx
+      # service above.
+      - wger-internal
+    cpu_shares: 70
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  wger-db:
+    image: postgres:16.13-alpine
+    container_name: wger-db
+    # The postgres entrypoint starts as root to chown PGDATA and drops to the
+    # postgres user itself; the mount is under AppData and nowhere else.
+    user: "0:0"
+    restart: unless-stopped
+    shm_size: 128mb
+    environment:
+      TZ: $TZ
+      POSTGRES_DB: wger
+      POSTGRES_USER: wger
+      POSTGRES_PASSWORD: ${WGER_DB_PASSWORD}
+    # wal_level=logical is what PowerSync's replication slot needs; the image's
+    # default `replica` cannot feed one, and the setting only takes effect on a
+    # restart, so it belongs here rather than in a runtime ALTER SYSTEM.
+    #
+    # max_slot_wal_keep_size caps what an idle slot may pin. A stopped or broken
+    # PowerSync would otherwise hold WAL indefinitely and fill /DATA -- a way to
+    # lose a server that upstream's compose leaves open. Past the cap postgres
+    # invalidates the slot instead, which costs PowerSync a fresh snapshot and
+    # the phone a resync. That is a wait, not data loss: every row still lives
+    # in the tables this is replicating from.
+    #
+    # Once the slot exists this line is load-bearing for *startup*, not just for
+    # sync: postgres refuses to boot at all against a pgdata holding a logical
+    # slot when wal_level is lower -- "FATAL: logical replication slot ...
+    # exists, but wal_level < logical", then "aborting startup". So dropping the
+    # flag, or rolling this app back to a revision from before PowerSync, takes
+    # the whole app down rather than degrading it, and every service waiting on
+    # the db healthcheck sits in Created. The fix is to put the flag back; the
+    # slot then resumes where it left off. Dropping the slot instead costs a
+    # fresh snapshot and needs wal_level=logical to start postgres anyway.
+    command:
+      - postgres
+      - -c
+      - wal_level=logical
+      - -c
+      - max_slot_wal_keep_size=1GB
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/pgdata/:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U wger -d wger"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+    networks:
+      # App-private only. A service called `db` on the shared network would
+      # answer every other app's `db` lookups, and theirs ours.
+      - wger-internal
+    cpu_shares: 70
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  wger-cache:
+    image: redis:8.2.9-alpine
+    container_name: wger-cache
+    restart: unless-stopped
+    # The image's entrypoint would drop to its own `redis` user (uid 999), but
+    # the /data bind below is created by `folders:` as $PUID:$PGID. Redis would
+    # then fail every background save with "Failed opening the temp RDB file
+    # ... Permission denied", and because stop-writes-on-bgsave-error defaults
+    # to yes it starts refusing writes: celery loses its broker with "MISCONF
+    # Redis is configured to save RDB snapshots, but is currently not able to
+    # persist on disk" and the worker healthcheck fails. Nothing here needs
+    # root, so run as the same uid that owns the directory.
+    user: "$PUID:$PGID"
+    environment:
+      TZ: $TZ
+    # `volatile-lru` and not `allkeys-*`: db 1 holds the Django cache, whose
+    # keys expire, but db 2 is the celery broker, whose queued tasks do not --
+    # evicting those would silently drop the background syncs.
+    command:
+      - redis-server
+      - --maxmemory
+      - 192mb
+      - --maxmemory-policy
+      - volatile-lru
+      - --save
+      - "900"
+      - "1"
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/redis/:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 20s
+    networks:
+      - wger-internal
+    cpu_shares: 50
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+  # The phone app's offline sync. Not an optional extra: the Flutter client has
+  # been offline-first since 2.0.3 and has no REST fallback, so an install
+  # without this service lets the app log in and then leaves it on "Sync Service
+  # Unreachable" with nothing syncing. The web UI does not use it at all.
+  #
+  # It reads the wger database through the `powersync` publication that wger's
+  # own core migration 0027 declares, and keeps its sync buckets in a schema of
+  # that same database under a separate role, created by the
+  # setup-powersync-storage init step below. Its config is two files in
+  # config-powersync/, re-rendered on every up so an app update ships new sync
+  # rules rather than leaving stale ones in place.
+  wger-powersync:
+    image: docker.io/journeyapps/powersync-service:1.26.0
+    container_name: wger-powersync
+    restart: unless-stopped
+    # API server and replication worker in one process. Upstream splits them
+    # only for horizontal scaling, which one person's training log does not
+    # need, and two containers would double the idle memory.
+    command: ["start", "-r", "unified"]
+    environment:
+      TZ: $TZ
+      POWERSYNC_CONFIG_PATH: /config/powersync.yaml
+      PS_PORT: "8080"
+      PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+      # Never left to the app's default. wger ships a *literal* fallback for
+      # this -- user powersync_storage, password powersync_password -- and a
+      # deployment that inherits it has a published database credential.
+      PS_STORAGE_PG_URI: postgres://powersync_storage:${WGER_PS_STORAGE_PASSWORD}@wger-db:5432/wger
+      # The public half of the RSA keypair the pre_install hook generated. The
+      # app asks wger for a token and PowerSync verifies it against this.
+      PS_JWKS_URL: http://wger-web:8000/api/v2/powersync-keys
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/config-powersync/:/config:ro
+    expose:
+      - 8080
+    depends_on:
+      wger-db:
+        condition: service_healthy
+    healthcheck:
+      # node and nothing else: this image carries no wget, no curl and no shell
+      # utilities worth relying on. Node 18+ has fetch built in.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/probes/liveness').then(r=>process.exit(r.ok?0:1),()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      # On a first install the storage role does not exist until the post_up
+      # step has run, and that waits on the app's own first boot, so this
+      # container restarts a few times before it settles. Restarting is the
+      # intended behaviour there, not a failure to report on the tile.
+      start_period: 600s
+    networks:
+      # App-private only. The phone reaches it through nginx's /ps/ route, which
+      # is the same host and certificate as the app itself.
+      - wger-internal
+    cpu_shares: 30
+    deploy:
+      resources:
+        limits:
+          # Measured at ~115 MB with the whole exercise database replicated and
+          # one user synced. The headroom is for the ingredient tables, which
+          # this store leaves out of the default install but the tips explain
+          # how to turn on -- that import is what makes this dataset large.
+          memory: 512M
+
+  # Runs the exercise/ingredient syncs and the API cache warm-up off the request
+  # path. Shares the media mount because the image downloads land there.
+  wger-worker:
+    image: docker.io/wger/server:2.7.0
+    container_name: wger-worker
+    restart: unless-stopped
+    command: /start-worker
+    environment:
+      TZ: $TZ
+      TIME_ZONE: $TZ
+      SITE_URL: https://wger-${APP_DOMAIN}
+      SECRET_KEY: ${WGER_SECRET_KEY}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+      # The web container owns the schema; a worker racing it during an upgrade
+      # is how two processes end up applying the same migration.
+      DJANGO_PERFORM_MIGRATIONS: "False"
+      DJANGO_COLLECTSTATIC_ON_STARTUP: "False"
+      SYNC_EXERCISES_ON_STARTUP: "False"
+      DJANGO_CACHE_BACKEND: django_redis.cache.RedisCache
+      DJANGO_CACHE_LOCATION: redis://wger-cache:6379/1
+      DJANGO_CACHE_CLIENT_CLASS: django_redis.client.DefaultClient
+      USE_CELERY: "True"
+      CELERY_BROKER: redis://wger-cache:6379/2
+      CELERY_BACKEND: redis://wger-cache:6379/2
+      # One worker process: these are slow network-bound sync jobs on a shared
+      # box, not a throughput problem.
+      CELERY_WORKER_CONCURRENCY: "1"
+      WGER_INSTANCE: https://wger.de
+      DOWNLOAD_INGREDIENTS_FROM: WGER
+      DJANGO_DEBUG: "False"
+      LOG_LEVEL_PYTHON: WARNING
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/media/:/home/wger/media
+    depends_on:
+      wger-web:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "celery", "-A", "wger", "inspect", "ping"]
+      interval: 60s
+      timeout: 20s
+      retries: 5
+      start_period: 120s
+    networks:
+      - wger-internal
+    cpu_shares: 20
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # Schedules the jobs the worker runs.
+  wger-beat:
+    image: docker.io/wger/server:2.7.0
+    container_name: wger-beat
+    restart: unless-stopped
+    command: /start-beat
+    environment:
+      TZ: $TZ
+      TIME_ZONE: $TZ
+      SITE_URL: https://wger-${APP_DOMAIN}
+      SECRET_KEY: ${WGER_SECRET_KEY}
+      JWT_PRIVATE_KEY: ${JWT_PRIVATE_KEY:-}
+      JWT_PUBLIC_KEY: ${JWT_PUBLIC_KEY:-}
+      PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+      DJANGO_PERFORM_MIGRATIONS: "False"
+      DJANGO_COLLECTSTATIC_ON_STARTUP: "False"
+      SYNC_EXERCISES_ON_STARTUP: "False"
+      DJANGO_CACHE_BACKEND: django_redis.cache.RedisCache
+      DJANGO_CACHE_LOCATION: redis://wger-cache:6379/1
+      DJANGO_CACHE_CLIENT_CLASS: django_redis.client.DefaultClient
+      USE_CELERY: "True"
+      CELERY_BROKER: redis://wger-cache:6379/2
+      CELERY_BACKEND: redis://wger-cache:6379/2
+      SYNC_EXERCISES_CELERY: "True"
+      SYNC_EXERCISE_IMAGES_CELERY: "True"
+      SYNC_EXERCISE_VIDEOS_CELERY: "False"
+      SYNC_INGREDIENTS_CELERY: "False"
+      CACHE_API_EXERCISES_CELERY: "True"
+      DJANGO_DEBUG: "False"
+      LOG_LEVEL_PYTHON: WARNING
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/beat/:/home/wger/beat
+    depends_on:
+      wger-worker:
+        condition: service_started
+    networks:
+      - wger-internal
+    cpu_shares: 20
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+networks:
+  pcs:
+    name: ${APP_NET:-pcs}
+    external: true
+  # App-private link between nginx, the app, its database, its cache and the two
+  # celery processes. Named explicitly so the init step below can join it.
+  wger-internal:
+    name: wger-internal
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: wger
+  store_app_id: wger
+  webui_port: 80
+  index: /
+  icon: icon.png
+  screenshot_link:
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
+  category: Utilities
+  tags: ["health", "fitness", "personal"]
+  developer: wger Project
+  title:
+    en_us: wger
+  tagline:
+    en_us: Track your workouts, body weight and nutrition
+    fr_fr: Suivez vos entraînements, votre poids et votre alimentation
+    de_de: Trainingspläne, Körpergewicht und Ernährung im Blick
+    es_es: Registra tus entrenamientos, tu peso y tu alimentación
+    zh_cn: 记录你的训练、体重和饮食
+  description:
+    en_us: |
+      **Your training log, on your own server**
+
+      wger is a workout and nutrition tracker. Build a routine, log every set you
+      actually lift, and watch the numbers move over weeks and months instead of
+      guessing whether you are making progress.
+
+      **What you can do:**
+      • Build workout routines from a database of hundreds of exercises, with pictures
+      • Log each session set by set, and see your history per exercise
+      • Track body weight and measurements (arms, chest, waist) as charts over time
+      • Plan meals and count calories, protein, carbs and fat
+      • Scan a product barcode to add what you ate
+      • Use the wger phone app against this server, so the log is on you at the gym
+
+      **Think of it like:** the training notebook people carry between machines, except
+      it draws the graphs for you and you can search five years of it.
+
+      **Perfect if you:** lift, run or cycle regularly and want to see long-term
+      progress, or want your health data somewhere you control.
+    fr_fr: |
+      **Votre carnet d'entraînement, sur votre propre serveur**
+
+      wger suit vos entraînements et votre alimentation. Créez un programme, notez chaque
+      série réellement effectuée, et regardez les chiffres évoluer au fil des semaines au
+      lieu de deviner si vous progressez.
+
+      **Ce que vous pouvez faire :**
+      • Créer des programmes à partir d'une base de centaines d'exercices illustrés
+      • Enregistrer chaque séance série par série et consulter l'historique par exercice
+      • Suivre poids et mensurations (bras, poitrine, taille) sous forme de courbes
+      • Planifier vos repas et compter calories, protéines, glucides et lipides
+      • Scanner le code-barres d'un produit pour l'ajouter à votre journal
+      • Utiliser l'application mobile wger avec ce serveur, pour l'avoir sur vous à la salle
+
+      **Pensez-y comme :** le carnet d'entraînement qu'on trimballe entre les machines,
+      sauf qu'il trace les courbes et qu'on peut y chercher cinq ans en arrière.
+
+      **Parfait si vous :** vous entraînez régulièrement et voulez voir votre progression
+      sur le long terme, ou voulez garder vos données de santé chez vous.
+    de_de: |
+      **Dein Trainingstagebuch auf deinem eigenen Server**
+
+      wger protokolliert Training und Ernährung. Leg einen Trainingsplan an, trag jeden
+      Satz ein, den du wirklich gemacht hast, und sieh über Wochen und Monate, wie sich
+      die Zahlen entwickeln, statt zu raten, ob es vorangeht.
+
+      **Was du machen kannst:**
+      • Trainingspläne aus einer Datenbank mit hunderten bebilderten Übungen bauen
+      • Jede Einheit satzweise protokollieren und den Verlauf pro Übung ansehen
+      • Körpergewicht und Maße (Arme, Brust, Taille) als Kurven verfolgen
+      • Mahlzeiten planen und Kalorien, Eiweiß, Kohlenhydrate und Fett zählen
+      • Produkte per Barcode scannen und ins Ernährungstagebuch übernehmen
+      • Die wger-App mit diesem Server nutzen, damit alles im Gym dabei ist
+
+      **Stell es dir vor wie:** das Trainingsheft, das man zwischen den Geräten mitnimmt --
+      nur dass es die Kurven selbst zeichnet und fünf Jahre durchsuchbar bleiben.
+
+      **Ideal wenn du:** regelmäßig trainierst und langfristige Fortschritte sehen willst
+      oder deine Gesundheitsdaten selbst verwalten möchtest.
+    es_es: |
+      **Tu cuaderno de entrenamiento, en tu propio servidor**
+
+      wger registra tus entrenamientos y tu alimentación. Crea una rutina, anota cada serie
+      que realmente levantas y observa cómo cambian los números durante semanas y meses en
+      lugar de adivinar si estás progresando.
+
+      **Lo que puedes hacer:**
+      • Crear rutinas desde una base de cientos de ejercicios con imágenes
+      • Registrar cada sesión serie a serie y ver el historial de cada ejercicio
+      • Seguir peso corporal y medidas (brazos, pecho, cintura) en gráficas
+      • Planificar comidas y contar calorías, proteínas, carbohidratos y grasas
+      • Escanear el código de barras de un producto para añadir lo que comiste
+      • Usar la app móvil de wger contra este servidor y llevarlo al gimnasio
+
+      **Piénsalo como:** la libreta de entrenamiento que se lleva entre máquinas, solo que
+      dibuja las gráficas por ti y puedes buscar en cinco años de registros.
+
+      **Perfecto si:** entrenas con regularidad y quieres ver tu progreso a largo plazo, o
+      quieres tus datos de salud bajo tu control.
+    zh_cn: |
+      **属于你自己的训练日志**
+
+      wger 是训练与营养记录工具。制定训练计划，记录你真正完成的每一组，用数周数月的数据
+      看清进展，而不是凭感觉猜测。
+
+      **你可以做什么：**
+      • 从数百个带图示的动作库中编排训练计划
+      • 逐组记录每次训练，按动作查看历史记录
+      • 以曲线追踪体重与围度（手臂、胸围、腰围）
+      • 规划饮食，统计热量、蛋白质、碳水和脂肪
+      • 扫描商品条码，快速记录吃了什么
+      • 用 wger 手机应用连接此服务器，训练时随身可查
+
+      **可以这样想：** 健身房里随身携带的训练笔记本，只是它会自动画出曲线，还能检索五年
+      前的记录。
+
+      **非常适合：** 长期规律训练、想看到长期进步，或希望自己掌控健康数据的人。
+  tips:
+    before_install:
+      en_us: |
+        **Your account**
+        | Username | Password |
+        | -------- | ----------------------- |
+        | `admin`  | `$APP_DEFAULT_PASSWORD` |
+
+        **⚠️ Change the password after your first login** (avatar menu → Preferences).
+
+        **The first start takes a few minutes** while the app sets up its database and
+        prepares its files. Later starts take about a minute.
+
+        **The exercise database is there from the first login** -- around 900 exercises.
+        Their pictures download in the background over the next few minutes, so tiles
+        that look blank at first fill in on their own.
+
+        **How to use:**
+        1. Log in with the details above
+        2. Routines → add a routine, then add exercises and set your target sets and reps
+        3. On training day, open the routine and log each set as you go
+        4. Body weight → add today's weight; the chart builds itself over time
+        5. Nutrition → create a plan and log meals, or scan a product barcode
+
+        **On your phone:** install the wger app from your app store, choose "custom
+        server" and enter this app's address. Everything you log there shows up here.
+
+        **New accounts:** sign-up is closed, so the address cannot be used by strangers
+        to make accounts on your server. To add someone -- a partner, a training buddy --
+        use User list in the admin menu.
+
+        **Two heavy background jobs are off by default:** the bulk food-database import
+        and the exercise video downloads, both of which run to hundreds of megabytes or
+        more. The barcode scanner still fetches products one at a time as you scan them.
+      fr_fr: |
+        **Votre compte**
+        | Utilisateur | Mot de passe |
+        | ----------- | ----------------------- |
+        | `admin`     | `$APP_DEFAULT_PASSWORD` |
+
+        **⚠️ Changez le mot de passe après la première connexion** (menu avatar →
+        Préférences).
+
+        **Le premier démarrage prend quelques minutes**, le temps que l'application
+        prépare sa base et ses fichiers. Les démarrages suivants prennent environ une
+        minute.
+
+        **La base d'exercices est disponible dès la première connexion** -- environ 900
+        exercices. Leurs images se téléchargent en arrière-plan dans les minutes qui
+        suivent, les vignettes vides se remplissent donc toutes seules.
+
+        **Comment l'utiliser :**
+        1. Connectez-vous avec les identifiants ci-dessus
+        2. Programmes → créez un programme, ajoutez des exercices, séries et répétitions
+        3. Le jour J, ouvrez le programme et notez chaque série au fur et à mesure
+        4. Poids → saisissez le poids du jour ; la courbe se construit toute seule
+        5. Nutrition → créez un plan et notez vos repas, ou scannez un code-barres
+
+        **Sur votre téléphone :** installez l'application wger, choisissez « serveur
+        personnalisé » et saisissez l'adresse de cette application.
+
+        **Nouveaux comptes :** les inscriptions sont fermées, l'adresse ne peut donc pas
+        servir à créer des comptes chez vous. Pour ajouter quelqu'un, passez par la liste
+        des utilisateurs dans le menu d'administration.
+
+        **Deux tâches de fond lourdes sont désactivées :** l'import en masse de la base
+        alimentaire et le téléchargement des vidéos d'exercices, qui pèsent plusieurs
+        centaines de mégaoctets. Le scanner de code-barres récupère quand même chaque
+        produit à la volée.
+      de_de: |
+        **Dein Konto**
+        | Benutzername | Passwort |
+        | ------------ | ----------------------- |
+        | `admin`      | `$APP_DEFAULT_PASSWORD` |
+
+        **⚠️ Ändere das Passwort nach der ersten Anmeldung** (Avatar-Menü →
+        Einstellungen).
+
+        **Der erste Start dauert einige Minuten**, während die App ihre Datenbank und
+        ihre Dateien vorbereitet. Spätere Starts dauern etwa eine Minute.
+
+        **Die Übungsdatenbank ist ab der ersten Anmeldung da** -- rund 900 Übungen. Die
+        Bilder dazu werden in den folgenden Minuten im Hintergrund geladen; anfangs leere
+        Kacheln füllen sich also von selbst.
+
+        **So geht's:**
+        1. Mit den Daten oben anmelden
+        2. Trainingspläne → Plan anlegen, Übungen mit Sätzen und Wiederholungen ergänzen
+        3. Am Trainingstag den Plan öffnen und jeden Satz direkt eintragen
+        4. Körpergewicht → heutiges Gewicht eintragen; die Kurve entsteht von selbst
+        5. Ernährung → Plan anlegen und Mahlzeiten erfassen oder Barcode scannen
+
+        **Auf dem Handy:** die wger-App installieren, „eigener Server" wählen und die
+        Adresse dieser App eintragen.
+
+        **Neue Konten:** Die Registrierung ist geschlossen, über die Adresse kann sich
+        also niemand ein Konto anlegen. Zum Hinzufügen einer Person die Benutzerliste im
+        Administrationsmenü verwenden.
+
+        **Zwei schwere Hintergrundjobs sind aus:** der Massenimport der
+        Lebensmitteldatenbank und der Download der Übungsvideos, beide mehrere hundert
+        Megabyte groß. Der Barcode-Scanner holt Produkte trotzdem einzeln beim Scannen.
+      es_es: |
+        **Tu cuenta**
+        | Usuario | Contraseña |
+        | ------- | ----------------------- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+
+        **⚠️ Cambia la contraseña tras el primer inicio de sesión** (menú de avatar →
+        Preferencias).
+
+        **El primer arranque tarda unos minutos** mientras la aplicación prepara su base
+        de datos y sus archivos. Los arranques posteriores tardan alrededor de un minuto.
+
+        **La base de ejercicios está disponible desde el primer inicio de sesión** -- unos
+        900 ejercicios. Sus imágenes se descargan en segundo plano en los minutos
+        siguientes, así que las miniaturas vacías se completan solas.
+
+        **Cómo usarlo:**
+        1. Inicia sesión con los datos de arriba
+        2. Rutinas → crea una rutina y añade ejercicios con series y repeticiones
+        3. El día de entreno, abre la rutina y registra cada serie sobre la marcha
+        4. Peso corporal → añade el peso de hoy; la gráfica se construye sola
+        5. Nutrición → crea un plan y registra comidas, o escanea un código de barras
+
+        **En el móvil:** instala la app de wger, elige «servidor personalizado» e
+        introduce la dirección de esta aplicación.
+
+        **Cuentas nuevas:** el registro está cerrado, así que nadie puede crearse una
+        cuenta desde esta dirección. Para añadir a alguien, usa la lista de usuarios del
+        menú de administración.
+
+        **Dos tareas pesadas están desactivadas:** la importación masiva de la base de
+        alimentos y la descarga de vídeos de ejercicios, ambas de cientos de megabytes. El
+        escáner de códigos de barras sigue trayendo cada producto al escanearlo.
+      zh_cn: |
+        **你的账号**
+        | 用户名  | 密码 |
+        | ------- | ----------------------- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+
+        **⚠️ 首次登录后请修改密码**（头像菜单 → 偏好设置）。
+
+        **首次启动需要几分钟**，应用会准备数据库和静态文件。之后的启动大约一分钟。
+
+        **动作库首次登录时即可使用** —— 约 900 个动作。配图会在随后的几分钟内于后台
+        下载，一开始空白的图块会自动补齐。
+
+        **使用方法：**
+        1. 用上面的信息登录
+        2. 训练计划 → 新建计划，添加动作并设定组数与次数
+        3. 训练当天打开计划，边练边记录每一组
+        4. 体重 → 记录今天的体重，曲线会自动生成
+        5. 营养 → 创建饮食计划记录三餐，或扫描商品条码
+
+        **在手机上：** 安装 wger 手机应用，选择"自定义服务器"并填入本应用的地址。
+
+        **新账号：** 注册已关闭，别人无法通过这个地址在你的服务器上注册。要添加成员，
+        请使用管理菜单中的用户列表。
+
+        **两项耗资源的后台任务默认关闭：** 食物数据库批量导入和动作视频下载，两者都有
+        数百兆甚至更多。条码扫描仍会在扫描时逐个获取商品信息。
+
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before any image is
+  # pulled and before any container starts. The app image runs as its own `wger`
+  # user (uid 1000), which is what $PUID is on a PCS -- without this, compose
+  # would create static/ and media/ root-owned and collectstatic would fail on
+  # the first boot.
+  folders:
+    - path: /DATA/AppData/$AppID/config
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/config-powersync
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/pgdata
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/redis
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/static
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/media
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/$AppID/beat
+      user: $PUID
+      group: $PGID
+  secrets:
+    # Django's session and CSRF signing key. Generated once, so sessions survive
+    # a restart -- the app generates a throwaway key when this is empty.
+    WGER_SECRET_KEY: alnum:50
+    # Kept alphanumeric on purpose: it is substituted into a postgres:// URL,
+    # where a generator emitting `@`, `/` or `:` would produce a URL that parses
+    # into the wrong host.
+    WGER_DB_PASSWORD: alnum:32
+    # PowerSync's own database role, kept separate from the app's: it owns only
+    # the sync-bucket schema and reads the tables through a replication slot.
+    # Alphanumeric for the same reason as the one above -- it is substituted
+    # into a postgres:// URL.
+    WGER_PS_STORAGE_PASSWORD: alnum:32
+  files:
+    # These three are declared rather than left to the seed tree, which is
+    # create-if-absent: an app update that changes nginx's routing or the sync
+    # rules has to reach an install that already has the old files on disk.
+    # Nothing in them is meant to be hand-edited, and the sync rules in
+    # particular must match the server image's `powersync` publication -- a
+    # stale copy is a client that silently syncs the wrong table set.
+    - path: /DATA/AppData/$AppID/config/nginx.conf
+      from: config/nginx.conf
+      ensure: always
+      mode: "0644"
+    - path: /DATA/AppData/$AppID/config-powersync/powersync.yaml
+      from: config-powersync/powersync.yaml
+      ensure: always
+      mode: "0644"
+    - path: /DATA/AppData/$AppID/config-powersync/sync_rules.yaml
+      from: config-powersync/sync_rules.yaml
+      ensure: always
+      mode: "0644"
+  init:
+    # PowerSync keeps its sync buckets in a schema of the wger database, owned
+    # by a role of its own. wger ships the command that creates both; it reads
+    # PS_STORAGE_PG_URI, creates or updates the role and schema to match, and
+    # no-ops when that variable is unset or the database is not postgres.
+    #
+    # `always`, not `once`: it costs one short container per up, and the two
+    # states it repairs -- a database restored without the role, or a role whose
+    # password no longer matches the generated secret -- would otherwise leave
+    # PowerSync unable to start with nothing left to re-run. The retry loop
+    # covers the gap between `up` returning and postgres accepting connections.
+    - name: setup-powersync-storage
+      image: docker.io/wger/server:2.7.0
+      phase: post_up
+      network: wger-internal
+      when: always
+      user: $PUID:$PGID
+      environment:
+        PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+        PS_STORAGE_PG_URI: postgres://powersync_storage:${WGER_PS_STORAGE_PASSWORD}@wger-db:5432/wger
+        SECRET_KEY: ${WGER_SECRET_KEY}
+        DJANGO_DEBUG: "False"
+      entrypoint:
+        - /bin/sh
+      command:
+        - -c
+        - |
+          exec python3 - <<'PY'
+          import sys
+          import time
+
+          import django
+
+          django.setup()
+
+          from django.core.management import call_command
+          from django.db import connections
+
+          last = None
+          for _ in range(30):
+              try:
+                  call_command('setup-powersync-storage')
+                  sys.exit(0)
+              except Exception as exc:
+                  # Almost always postgres not accepting connections yet.
+                  last = exc
+                  connections.close_all()
+                  time.sleep(5)
+
+          sys.exit('wger: could not set up the PowerSync storage role: {}'.format(last))
+          PY
+
+    # Three jobs the app needs done once, at the start, rather than whenever its
+    # weekly schedule happens to fire: refresh the exercise database from
+    # WGER_INSTANCE, download the pictures for it, and warm the exercise API
+    # cache. All three already exist as celery tasks and are already scheduled,
+    # but `add_periodic_task` picks a random day-of-week and time when beat
+    # starts (wger/exercises/tasks.py), so on a fresh install they could be up to
+    # a week away -- and until the cache warm-up has run, the exercise browser's
+    # first `GET /api/v2/exerciseinfo/` leaves the page on skeleton placeholders
+    # for a long time. This queues all three so that is a matter of minutes; the
+    # weekly schedule then keeps them current.
+    #
+    # Queuing rather than running: `.delay()` returns as soon as redis has the
+    # message, so the install is not held open by a download, and the worker --
+    # concurrency 1, so these run in the order queued -- picks them up once it is
+    # up, which is after the web container is healthy and therefore after the
+    # migrations. Measured on a fresh install: the metadata sync took ~3.5
+    # minutes and the images ~2 more (about 900 exercises, ~210 MB), with the app
+    # answering throughout.
+    #
+    # The image download carries an explicit time limit as a guard, not because
+    # it normally needs one: upstream's fetches set no HTTP timeout of their own,
+    # and a hand-run `download-exercise-images` was seen wedged on a single
+    # request for over ten minutes with no progress. Unbounded, one such request
+    # would hold the only worker process indefinitely and every later job with
+    # it.
+    - name: seed-exercise-database
+      image: docker.io/wger/server:2.7.0
+      phase: post_up
+      network: wger-internal
+      when: once
+      user: $PUID:$PGID
+      environment:
+        PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+        SECRET_KEY: ${WGER_SECRET_KEY}
+        DJANGO_DEBUG: "False"
+        USE_CELERY: "True"
+        CELERY_BROKER: redis://wger-cache:6379/2
+        CELERY_BACKEND: redis://wger-cache:6379/2
+      entrypoint:
+        - /bin/sh
+      command:
+        - -c
+        - |
+          exec python3 - <<'PY'
+          import django
+
+          django.setup()
+
+          from wger.exercises.tasks import (
+              cache_api_exercises_task,
+              sync_exercises_task,
+              sync_images_task,
+          )
+
+          sync_exercises_task.delay()
+          print('wger: queued the exercise database sync')
+
+          sync_images_task.apply_async(soft_time_limit=3600, time_limit=3900)
+          print('wger: queued the exercise image download')
+
+          # Queued last so it caches the exercises the two syncs just wrote.
+          cache_api_exercises_task.delay()
+          print('wger: queued the exercise API cache warm-up')
+          PY
+
+    # wger seeds its first admin from a fixture during `wger bootstrap`, with the
+    # username `admin` and the published upstream password `adminadmin`
+    # (wger/tasks.py, create_or_reset_admin). There is no environment variable
+    # that changes it, so the rotation happens here, once the app is up and the
+    # user exists.
+    #
+    # It rotates only when the password is still the upstream default, so a
+    # re-run over an install whose owner has already changed it does nothing --
+    # and django-axes, which locks an account out after 10 failures, never sees a
+    # wrong password from this step because it checks the hash directly rather
+    # than logging in.
+    #
+    # A run that never finds the user exits non-zero. post_up failures are logged
+    # and swallowed rather than taking a healthy stack down, and the `once`
+    # marker stays unwritten, so the next start tries again.
+    - name: rotate-admin-password
+      image: docker.io/wger/server:2.7.0
+      phase: post_up
+      network: wger-internal
+      when: once
+      user: $PUID:$PGID
+      environment:
+        PS_DATABASE_URI: postgres://wger:${WGER_DB_PASSWORD}@wger-db:5432/wger
+        SECRET_KEY: ${WGER_SECRET_KEY}
+        DJANGO_DEBUG: "False"
+        DJANGO_CACHE_BACKEND: django_redis.cache.RedisCache
+        DJANGO_CACHE_LOCATION: redis://wger-cache:6379/1
+        DJANGO_CACHE_CLIENT_CLASS: django_redis.client.DefaultClient
+        WGER_ADMIN_PASSWORD: ${APP_DEFAULT_PASSWORD}
+        WGER_ADMIN_EMAIL: ${APP_EMAIL}
+        WGER_SEED_PASSWORD: adminadmin
+      entrypoint:
+        - /bin/sh
+      command:
+        - -c
+        - |
+          exec python3 - <<'PY'
+          import os
+          import sys
+          import time
+
+          import django
+
+          django.setup()
+
+          from django.contrib.auth.models import User
+          from django.db import connections
+
+          seed = os.environ['WGER_SEED_PASSWORD']
+          new = os.environ['WGER_ADMIN_PASSWORD']
+          email = os.environ['WGER_ADMIN_EMAIL']
+
+          if not new:
+              sys.exit('wger: no generated password to set, leaving the admin alone')
+
+          # The first boot runs migrations, collectstatic and the exercise sync
+          # before the fixture user is there to find, which is appreciably longer
+          # than the container takes to appear.
+          admin = None
+          for _ in range(150):
+              try:
+                  admin = User.objects.filter(username='admin').first()
+              except Exception:
+                  connections.close_all()
+                  admin = None
+              if admin is not None:
+                  break
+              time.sleep(4)
+
+          if admin is None:
+              sys.exit('wger: the admin user did not appear within 10 minutes')
+
+          if not admin.check_password(seed):
+              print('wger: the admin password is not the shipped default, leaving it alone')
+              sys.exit(0)
+
+          admin.set_password(new)
+          if not admin.email and email:
+              admin.email = email
+          admin.save(update_fields=['password', 'email'])
+          print('wger: rotated the default admin password to the generated one')
+          PY
+  hooks:
+    # wger signs the JWTs its phone app authenticates with using an RS256
+    # keypair, supplied as two base64-wrapped JWKs. No `secrets:` generator
+    # produces an RSA key, and the two halves have to come from the *same*
+    # keypair, so they are generated together by the app's own management
+    # command and appended to the app's .env.
+    #
+    # Append, never `>`: Maison has already written APP_DOMAIN, PUID, PGID,
+    # APP_DEFAULT_PASSWORD and APP_NET into this file. The guard makes the hook a
+    # no-op on a reinstall over existing data, which matters -- regenerating the
+    # keypair would invalidate every phone still logged in.
+    #
+    # `--network none` because the command only generates a key; PS_DATABASE_URI
+    # is passed because the app's settings module refuses to import without a
+    # database URL, and this throwaway value is never connected to.
+    pre_install: |
+      grep -q '^JWT_PRIVATE_KEY=' $APP_DIR/.env || \
+        docker run --rm --network none \
+          -e PS_DATABASE_URI=postgres://wger:wger@127.0.0.1:5432/wger \
+          docker.io/wger/server:2.7.0 \
+          python3 manage.py generate-jwt-keys --kid wger \
+          | grep -E '^JWT_(PRIVATE|PUBLIC)_KEY=' >> $APP_DIR/.env
+  webui-host: wger-${domain}
+  webui-path: /

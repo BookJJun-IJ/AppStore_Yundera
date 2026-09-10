@@ -33,18 +33,30 @@ This document explains deviations from standard AppStore guidelines for the ngin
 
 **Permission Strategy**:
 - AppData-only access pattern
-- Pre-install script sets `chmod -R 755` on AppData directory for accessibility
-- Users can still edit files via file managers or SSH if needed
+- `/DATA/AppData/nginx/` and `/DATA/AppData/nginx/www/` are declared under
+  `x-compose-app.folders`, so Maison creates them and chowns them to `$PUID:$PGID`
+  before every `up`. Users can edit `nginx.conf` and add website files through the
+  built-in file manager or over SSH; nothing here is chmod'ed by the install hook.
+- The shipped `nginx.conf` additionally sets `user root;`. The stock image drops
+  its worker processes to uid 101, which cannot read a file created mode 0640 —
+  the mode the platform's file manager writes with. nginx then answers a bare 403
+  and the user's site silently never updates, which defeats the app's whole
+  "drop your files in" premise. Since the container is already root and mounts
+  nothing outside its own AppData folder, running the workers as root too widens
+  no boundary and is what makes the advertised workflow actually work.
 
-## Pre-Install Script Approach
+## First-Run Seeding Approach
 
-**Implementation**: Uses shell commands (`mkdir`, `cat`) directly rather than Docker containers.
+**Implementation**: Declarative `seed/` tree, mirroring `/DATA/AppData/nginx/`.
+`seed/www/index.html` and `seed/nginx.conf` are copied onto the host the first
+time the app is installed; no hook and no `pre-install-cmd` are involved.
 
 **Reason**:
-- Simple file creation doesn't require containerized tooling
-- More efficient for basic directory and file setup
-- Idempotent: Checks if files exist before creating them
-- No security risk as no external resources are downloaded
-- Follows patterns seen in other AppStore apps for basic initialization
-
-All operations are idempotent and safe to run multiple times during reinstallation.
+- Seeding two static files doesn't require containerized tooling or imperative
+  scripting — the `seed/` tree is exactly what CONTRIBUTING recommends for this
+  case.
+- Directories are declared under `x-compose-app.folders`, so Maison creates and
+  chowns them before the seed tree is applied.
+- Create-if-absent: Maison only writes a seed file when the destination path
+  doesn't already exist, so a reinstall or a version upgrade never overwrites
+  the user's site or their edited `nginx.conf`.

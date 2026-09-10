@@ -8,54 +8,76 @@ services:
     user: 0:0
     network_mode: host
     cpu_shares: 70
-    # only uncomment  for commpatibility with some linux distros
-    #command: [ "tailscaled", "--socket=/tmp/tailscaled.sock", "--statedir=/var/lib/tailscale", "--tun=kernel" ]
+    # The image's default entrypoint is `containerboot`, which runs `tailscale up`
+    # and — with no auth key — falls back to an INTERACTIVE login that it then kills
+    # after 60s. The container exits, `restart: unless-stopped` brings it back, and it
+    # repeats forever: a new nodekey and a new (already-dead) login URL every ~62s,
+    # while the tile reports `running` for ~60 of those 62 seconds, so the user gets
+    # no signal that anything is wrong.
+    #
+    # There is nothing to authenticate with until the user supplies TS_AUTHKEY, so
+    # don't pretend: run the daemon on its own instead. It idles, stays up, keeps its
+    # state dir, and the next restart picks up the key. Once the node HAS been
+    # authenticated the saved state in TS_STATE_DIR reconnects it on its own, so this
+    # branch is also the correct steady state for a node whose key has been removed.
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        if [ -n "$${TS_AUTHKEY}" ]; then
+          echo "tailscale: TS_AUTHKEY present — authenticating via containerboot."
+          exec /usr/local/bin/containerboot
+        fi
+        echo "tailscale: no TS_AUTHKEY set — starting tailscaled unauthenticated."
+        echo "tailscale: paste an auth key into TS_AUTHKEY in the app settings and"
+        echo "tailscale: restart the app to join your tailnet. See the app's tips."
+        exec /usr/local/bin/tailscaled \
+          --socket=/tmp/tailscaled.sock \
+          --statedir="$${TS_STATE_DIR:-/var/lib/tailscale}" \
+          --tun=kernel
     environment:
       - TZ=$TZ
       # if you want to use headscale instead of tailscale.com, add the next line and set your domain
       # - TS_EXTRA_ARGS=--login-server=https://headscale-$APP_DOMAIN
-      - TS_ACCEPT_DNS="true"
-      - TS_EXTRA_ARGS="--accept-routes"
-      - TS_AUTHKEY_INFO="Connect to the Tailscale Admin Console to generate an auth key and set it in the app settings before starting."
-      - TS_AUTHKEY=  # Set this in CasaOS before starting for automatic auth, or leave blank for manual setup
+      - TS_ACCEPT_DNS=true
+      - TS_EXTRA_ARGS=--accept-routes
+      - "TS_AUTHKEY_INFO=Connect to the Tailscale Admin Console to generate an auth key and set it in the app settings before starting."
+      - TS_AUTHKEY=${TS_AUTHKEY:-}  # Set this in CasaOS before starting for automatic auth, or leave blank for manual setup
       - TS_HOSTNAME=$APP_DOMAIN
-      - TS_USERSPACE="false"
+      - TS_USERSPACE=false
       - TS_STATE_DIR=/var/lib/tailscale
     cap_add:
       - NET_ADMIN
       - SYS_MODULE
     volumes:
-      - /DATA/AppData/tailscale/state/:/var/lib/tailscale/
+      - ${DATA_ROOT:-/DATA}/AppData/tailscale/state/:/var/lib/tailscale/
       - /dev/net/tun:/dev/net/tun
     restart: unless-stopped
 
 x-casaos:
-  pre-install-cmd: |
-    snap stop tailscale 2>/dev/null; snap disable tailscale 2>/dev/null;
-    systemctl stop tailscaled 2>/dev/null; systemctl disable tailscaled 2>/dev/null;
-    ip link delete tailscale0 2>/dev/null;
-    mkdir -p /DATA/AppData/tailscale/state &&
-    chown -R $PUID:$PGID /DATA/AppData/tailscale
-
+  # Headless app: no Caddy labels and no port of its own. `main` still has to name a
+  # service — Maison keys the tile's health off it — so it names the only one.
+  main: tailscale
   #this is the link for the webui port
   scheme: https
   hostname: login.tailscale.com
   port_map: "443"
-  index: /
+  # Same target as x-compose-app.webui-path below: the console's machines page.
+  index: /admin/machines
 
   architectures:
     - amd64
     - arm64
-  author: Yundera
   category: Network
+  tags: ["privacy", "personal", "developer"]
   description:
-    en_us: "Tailscale is a secure mesh VPN that creates encrypted connections between your devices. This container runs the Tailscale node daemon with web UI enabled for easy device management. Connect your CasaOS server to your Tailscale network to access it securely from anywhere. Includes exit node functionality to route traffic through your server and accept routes from other nodes. Perfect for secure remote access to your home lab and services."
+    en_us: "Tailscale is a secure mesh VPN that creates encrypted connections between your devices. This container runs the Tailscale node daemon on the host network — it has no web interface of its own; you manage the node from the Tailscale admin console, which the app's tile opens. Connect your server to your Tailscale network to reach it securely from anywhere. Includes exit node functionality to route traffic through your server and accept routes from other nodes. Perfect for secure remote access to your home lab and services. Requires an auth key from the Tailscale admin console — see the setup notes before installing."
   developer: Tailscale Inc.
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Tailscale/icon.png
+  icon: icon.png
+  thumbnail: thumbnail.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Tailscale/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Tailscale/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Tailscale/screenshot-3.png
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
   tagline:
     en_us: Zero-config mesh VPN for secure device connections
   title:
@@ -63,6 +85,16 @@ x-casaos:
   tips:
     before_install:
       en_us: |
+        **⚠️ Before Installing:**
+
+        This app runs the Tailscale daemon on the host network. If the host already
+        runs its own Tailscale (snap or system package), stop it from a host shell
+        first — two daemons cannot share the `tailscale0` interface:
+        ```
+        sudo systemctl disable --now tailscaled
+        sudo snap disable tailscale
+        ```
+
         **📡 After Installation:**
         
         **For Tailscale.com (Default):**
@@ -81,7 +113,7 @@ x-casaos:
            tskey-auth-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
            ```
         4. Go to your PCS, click on the **3 dots** on the Tailscale app, then click **Settings**
-        5. Set the auth key in the app settings
+        5. In the **Override** tab, under **Environment**, set the auth key
         
            In the field:
            ```
@@ -99,7 +131,7 @@ x-casaos:
         
         **For Headscale (Self-hosted):**
         1. Generate an auth key from your Headscale server
-        2. Set the `TS_AUTHKEY` in the app settings
+        2. Set the `TS_AUTHKEY` in the **Override** tab, under **Environment**
         3. Set the `TS_EXTRA_ARGS` to `--login-server=https://your-headscale-domain`
         4. Your server will appear in your Headscale network
         
@@ -110,3 +142,19 @@ x-casaos:
           CONTAINER_PORT= 8080
         ```
         You can find your Tailscale IP by running `tailscale ip` on the terminal or checking the Tailscale admin console.
+
+x-compose-app:
+  schema_version: 2
+  # The node has no UI of its own, so the tile opens the place you actually manage it
+  # from. Mirrors the x-casaos scheme/hostname/index above, which Maison does not read
+  # — the two blocks must agree so a CasaOS-only consumer lands on the same page.
+  webui-host: login.tailscale.com
+  webui-scheme: https
+  webui-path: /admin/machines
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/tailscale/state
+      user: $PUID
+      group: $PGID

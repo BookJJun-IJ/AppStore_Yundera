@@ -13,7 +13,7 @@ services:
       - MARIADB_AUTO_UPGRADE=1
       - TZ=$TZ
     volumes:
-      - /DATA/AppData/seafile/mysql/:/var/lib/mysql
+      - ${DATA_ROOT:-/DATA}/AppData/seafile/mysql/:/var/lib/mysql
     networks:
       - seafile-net
     healthcheck:
@@ -61,7 +61,7 @@ services:
       - 80
       - 8080
     volumes:
-      - /DATA/AppData/seafile/shared/:/shared
+      - ${DATA_ROOT:-/DATA}/AppData/seafile/shared/:/shared
     environment:
       - INIT_SEAFILE_ADMIN_EMAIL=admin@$APP_DOMAIN
       - INIT_SEAFILE_ADMIN_PASSWORD=$APP_DEFAULT_PASSWORD
@@ -94,7 +94,7 @@ services:
       - SEADOC_SERVER_URL=https://seafile-$APP_DOMAIN/sdoc-server
 
       - ENABLE_NOTIFICATION_SERVER=true
-      - INNER_NOTIFICATION_SERVER_URL=http://notification-server:8083
+      - INNER_NOTIFICATION_SERVER_URL=http://seafile-notification-server:8083
       - NOTIFICATION_SERVER_URL=https://seafile-$APP_DOMAIN/notification
 
       - ENABLE_SEAFILE_AI=false
@@ -106,18 +106,15 @@ services:
       caddy_0.import: gateway_tls
       # Notification server
       caddy_0.0_handle_path: "/notification/*"
-      caddy_0.0_handle_path.reverse_proxy: "notification-server:8083"
+      caddy_0.0_handle_path.reverse_proxy: "seafile-notification-server:8083"
       # SeaDoc WebSocket
       caddy_0.1_handle_path: "/socket.io/*"
       caddy_0.1_handle_path.0_rewrite: "* /socket.io{uri}"
-      caddy_0.1_handle_path.1_reverse_proxy: "seadoc:80"
+      caddy_0.1_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       # SeaDoc server
       caddy_0.2_handle_path: "/sdoc-server/*"
       caddy_0.2_handle_path.0_rewrite: "* {uri}"
-      caddy_0.2_handle_path.1_reverse_proxy: "seadoc:80"
-      # Rewrite bare / to /accounts/login/ to avoid 302 redirect (CF worker drops body on redirects)
-      caddy_0.@root.path: "/"
-      caddy_0.3_rewrite: "@root /accounts/login/"
+      caddy_0.2_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       # Default: main seafile app
       caddy_0.4_reverse_proxy: "{{upstreams 80}}"
 
@@ -125,29 +122,25 @@ services:
       caddy_1: seafile-${APP_PUBLIC_IP_DASH}.nip.io
       caddy_1.import: gateway_tls
       caddy_1.0_handle_path: "/notification/*"
-      caddy_1.0_handle_path.reverse_proxy: "notification-server:8083"
+      caddy_1.0_handle_path.reverse_proxy: "seafile-notification-server:8083"
       caddy_1.1_handle_path: "/socket.io/*"
       caddy_1.1_handle_path.0_rewrite: "* /socket.io{uri}"
-      caddy_1.1_handle_path.1_reverse_proxy: "seadoc:80"
+      caddy_1.1_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       caddy_1.2_handle_path: "/sdoc-server/*"
       caddy_1.2_handle_path.0_rewrite: "* {uri}"
-      caddy_1.2_handle_path.1_reverse_proxy: "seadoc:80"
-      caddy_1.@root.path: "/"
-      caddy_1.3_rewrite: "@root /accounts/login/"
+      caddy_1.2_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       caddy_1.4_reverse_proxy: "{{upstreams 80}}"
 
       # --- caddy_2: sslip.io fallback (no gateway_tls) ---
       caddy_2: seafile-${APP_PUBLIC_IP_DASH}.sslip.io
       caddy_2.0_handle_path: "/notification/*"
-      caddy_2.0_handle_path.reverse_proxy: "notification-server:8083"
+      caddy_2.0_handle_path.reverse_proxy: "seafile-notification-server:8083"
       caddy_2.1_handle_path: "/socket.io/*"
       caddy_2.1_handle_path.0_rewrite: "* /socket.io{uri}"
-      caddy_2.1_handle_path.1_reverse_proxy: "seadoc:80"
+      caddy_2.1_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       caddy_2.2_handle_path: "/sdoc-server/*"
       caddy_2.2_handle_path.0_rewrite: "* {uri}"
-      caddy_2.2_handle_path.1_reverse_proxy: "seadoc:80"
-      caddy_2.@root.path: "/"
-      caddy_2.3_rewrite: "@root /accounts/login/"
+      caddy_2.2_handle_path.1_reverse_proxy: "seafile-seadoc:80"
       caddy_2.4_reverse_proxy: "{{upstreams 80}}"
     depends_on:
       db:
@@ -164,16 +157,16 @@ services:
       timeout: 10s
       retries: 5
 
-  notification-server:
+  seafile-notification-server:
     image: seafileltd/notification-server:13.0.10
-    container_name: notification-server
+    container_name: seafile-notification-server
     restart: unless-stopped
     user: 0:0
     cpu_shares: 30
     expose:
       - 8083
     volumes:
-      - /DATA/AppData/seafile/shared/seafile/logs/:/shared/seafile/logs
+      - ${DATA_ROOT:-/DATA}/AppData/seafile/shared/seafile/logs/:/shared/seafile/logs
     environment:
       - SEAFILE_SERVER_HOSTNAME=seafile-$APP_DOMAIN
       - SEAFILE_SERVER_PROTOCOL=https
@@ -191,6 +184,8 @@ services:
       db:
         condition: service_healthy
     networks:
+      # Also on the shared network: the caddy_N label groups proxy
+      # /notification/* straight to this hostname, and Caddy runs on pcs.
       - seafile-net
       - pcs
     healthcheck:
@@ -200,17 +195,17 @@ services:
       timeout: 5s
       retries: 5
 
-  seadoc:
+  seafile-seadoc:
     image: seafileltd/sdoc-server:2.0.9
     container_name: seafile-seadoc
-    hostname: seadoc
+    hostname: seafile-seadoc
     restart: unless-stopped
     user: 0:0
     cpu_shares: 70
     expose:
       - 80
     volumes:
-      - /DATA/AppData/seafile/seadoc-data/:/shared
+      - ${DATA_ROOT:-/DATA}/AppData/seafile/seadoc-data/:/shared
     environment:
       - DB_HOST=db
       - DB_PORT=3306
@@ -229,6 +224,8 @@ services:
       seafile:
         condition: service_healthy
     networks:
+      # Also on the shared network: the caddy_N label groups proxy /sdoc-server/*
+      # and /socket.io/* straight to this hostname, and Caddy runs on pcs.
       - seafile-net
       - pcs
 
@@ -261,8 +258,8 @@ services:
       --uid $PUID
       --gid $PGID
     volumes:
-      - /DATA/Seafile/:/data/seafile:shared
-      - /DATA/AppData/seafile/rclone/:/config
+      - ${DATA_ROOT:-/DATA}/Seafile/:/data/seafile:shared
+      - ${DATA_ROOT:-/DATA}/AppData/seafile/rclone/:/config
     environment:
       - PUID=$PUID
       - PGID=$PGID
@@ -276,37 +273,15 @@ networks:
   seafile-net:
     name: seafile-net
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
 
 x-casaos:
   store_app_id: seafile
-  pre-install-cmd: |
-    mkdir -p /DATA/AppData/seafile/ &&
-    mkdir -p /DATA/AppData/seafile/seadoc-data &&
-    mkdir -p /DATA/AppData/seafile/shared/seafile/conf &&
-    mkdir -p /DATA/AppData/seafile/rclone &&
-    mkdir -p /DATA/Seafile &&
-    # Create rclone config with obscured password for WebDAV (only if not exists)
-    if [ ! -f /DATA/AppData/seafile/rclone/rclone.conf ]; then
-      echo "Creating rclone configuration..."
-      OBSCURED_PASS=$(docker run --rm rclone/rclone:1.73.3 obscure "$APP_DEFAULT_PASSWORD") &&
-      cat > /DATA/AppData/seafile/rclone/rclone.conf << EOF
-    [seafile-webdav]
-    type = webdav
-    url = http://seafile:8080/seafdav
-    vendor = other
-    user = admin@$APP_DOMAIN
-    pass = $OBSCURED_PASS
-    EOF
-      echo "rclone configuration created"
-    else
-      echo "rclone configuration already exists, skipping"
-    fi &&
-    chown $PUID:$PGID /DATA/AppData/seafile/ 2>/dev/null || true &&
-    chown $PUID:$PGID /DATA/AppData/seafile/rclone/ 2>/dev/null || true &&
-    chown $PUID:$PGID /DATA/AppData/seafile/rclone/rclone.conf 2>/dev/null || true &&
-    chown $PUID:$PGID /DATA/Seafile/ 2>/dev/null || true
+  # The one hook the migration leaves behind, and it earns it: it waits up to 25
+  # minutes for Seafile to write its OWN config, then patches two keys in it.
+  # Waiting on another program's runtime behaviour and editing what it produced is
+  # genuinely imperative — it is not a declaration wearing a script costume.
   post-install-cmd: |
     echo "Waiting for Seafile to finish initialization (up to 25 minutes)..."
     SEAHUB_SETTINGS="/DATA/AppData/seafile/shared/seafile/conf/seahub_settings.py"
@@ -329,7 +304,7 @@ x-casaos:
       echo "Re-adding SMTP configuration..."
       cat >> "$SEAHUB_SETTINGS" << EOF
 
-    # SMTP configuration (Yundera built-in SMTP service)
+    # SMTP configuration (the server's built-in SMTP service)
     EMAIL_USE_TLS = False
     EMAIL_HOST = 'smtp'
     EMAIL_HOST_USER = 'casaos'
@@ -340,38 +315,57 @@ x-casaos:
     EOF
       echo "SMTP configuration added"
     fi
+    # Ensure reverse-proxy HTTPS settings are present (mandatory for Caddy TLS termination)
+    if [ -f "$SEAHUB_SETTINGS" ] && ! grep -q "SECURE_PROXY_SSL_HEADER" "$SEAHUB_SETTINGS"; then
+      echo "Adding reverse-proxy HTTPS configuration..."
+      cat >> "$SEAHUB_SETTINGS" << EOF
+
+    # Reverse proxy HTTPS settings (Caddy terminates TLS, forwards X-Forwarded-Proto)
+    USE_X_FORWARDED_HOST = True
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+    SERVICE_URL = 'https://seafile-$APP_DOMAIN'
+    FILE_SERVER_ROOT = 'https://seafile-$APP_DOMAIN/seafhttp'
+    EOF
+      echo "Reverse-proxy HTTPS configuration added"
+    fi
     # Single restart to apply all config changes
     echo "Restarting Seafile to apply configuration..."
     docker restart seafile
-    # Ensure admin account exists (fallback if INIT_SEAFILE_ADMIN_* failed on first boot)
-    echo "Waiting for Seafile to be ready after restart..."
-    for i in $(seq 1 30); do
-      if docker exec seafile curl -sf http://localhost/ > /dev/null 2>&1; then
-        echo "Seafile is ready"
-        break
-      fi
-      sleep 10
-    done
-    echo "Ensuring admin account exists..."
-    printf 'admin@%s\n%s\n%s\n' "$APP_DOMAIN" "$APP_DEFAULT_PASSWORD" "$APP_DEFAULT_PASSWORD" | \
-      docker exec -i seafile /opt/seafile/seafile-server-latest/reset-admin.sh 2>&1 || \
-      echo "Warning: admin account setup returned an error (may already exist)"
+    # NOTE: an earlier revision ran reset-admin.sh here as a "fallback in case
+    # INIT_SEAFILE_ADMIN_* failed on first boot". Don't re-add that. Two Touchstone
+    # runs (2026-08-29, 2026-08-31) caught it creating a SECOND admin every single
+    # time -- a random <hex>@auth.local row with contact_email set to admin@$APP_DOMAIN
+    # -- even though INIT_SEAFILE_ADMIN_EMAIL/PASSWORD had already created the real
+    # admin@$APP_DOMAIN account 31s earlier in both captures. Seafile's web login
+    # resolves by contact_email and lands on that auth.local row, but
+    # POST /api2/auth-token/ (desktop/mobile/WebDAV, and this app's own rclone
+    # sidecar, whose seed/rclone/rclone.conf.tmpl logs in as admin@$APP_DOMAIN) does
+    # a literal username match and gets the OTHER, empty account -- so the one
+    # documented credential pair resolved to two different accounts, and a THIRD
+    # accreted on reinstall since the step had no existence guard at all. Seafile's
+    # own INIT_SEAFILE_ADMIN_EMAIL/INIT_SEAFILE_ADMIN_PASSWORD (set above, on the
+    # `seafile` service) is upstream's documented bootstrap for exactly this admin
+    # account, only fires while the ccnet/seahub DB is still empty (so it is already
+    # idempotent across reinstalls/upgrades), and is the identity Tips and the
+    # rclone sidecar already assume. If that mechanism is ever confirmed to fail on
+    # some install, the fix is a guard that checks whether admin@$APP_DOMAIN already
+    # authenticates before calling reset-admin.sh -- not an unconditional call.
     echo "Post-install complete"
   webui_port: 80
   main: seafile
 
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/icon.png
-  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/thumbnail.png
+  icon: icon.png
+  thumbnail: thumbnail.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/screenshot-3.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Seafile/screenshot-4.png
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
+    - screenshot-4.png
   architectures:
     - amd64
     - arm64
-  author: Yundera Team
   category: Cloud
+  tags: ["files", "personal", "business"]
   description:
     en_us: Seafile is a file hosting and collaboration platform with privacy protection and teamwork features. It allows you to create private clouds for file sharing and collaboration, supporting automatic sync across devices, version control, and secure file encryption. Perfect for teams and individuals who need reliable cloud storage with advanced sharing capabilities.
     es_es: Seafile es una plataforma de alojamiento y colaboración de archivos con protección de privacidad y características de trabajo en equipo. Te permite crear nubes privadas para compartir archivos y colaborar, con sincronización automática entre dispositivos, control de versiones y cifrado seguro de archivos.
@@ -412,3 +406,50 @@ x-casaos:
         - Virtual Seafile drive available at `/DATA/Seafile` on the host system
   title:
     en_us: Seafile
+
+x-compose-app:
+  schema_version: 2
+  # rclone's config carries the WebDAV password in rclone's own obscured form,
+  # which only rclone can produce — so the container stays, but what it prints is
+  # captured and substituted into seed/rclone/rclone.conf.tmpl rather than being
+  # interpolated into a heredoc by a shell.
+  init:
+    - name: obscure-webdav-password
+      image: rclone/rclone:1.73.3
+      command: ["obscure", "$APP_DEFAULT_PASSWORD"]
+      capture: RCLONE_OBSCURED_PASS
+      when: absent:/DATA/AppData/seafile/rclone/rclone.conf
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Mostly generated by scripts/gen-folders.py from the trailing-slash bind
+  # mounts in `volumes:` above — re-run it rather than hand-editing the
+  # generated entries. `/DATA/AppData/seafile` and `.../shared/seafile/conf`
+  # are hand-added: they are not bind sources but must exist owned by
+  # $PUID:$PGID before the stack starts.
+  folders:
+    - path: /DATA/AppData/seafile
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/seafile/mysql
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/seafile/shared
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/seafile/shared/seafile/logs
+      user: $PUID
+      group: $PGID
+    # Seafile writes its generated config here; declared so it exists owned by
+    # $PUID:$PGID rather than being created root:root by a hook.
+    - path: /DATA/AppData/seafile/shared/seafile/conf
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/seafile/seadoc-data
+      user: $PUID
+      group: $PGID
+    - path: /DATA/Seafile
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/seafile/rclone
+      user: $PUID
+      group: $PGID
+  webui-host: seafile-${domain}

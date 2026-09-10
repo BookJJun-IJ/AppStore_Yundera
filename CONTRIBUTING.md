@@ -10,31 +10,38 @@ Before submitting your PR, ensure your app meets these requirements:
 
 ### Tech Checklist
 - [ ] Proper file permissions based on volume usage. See [Permission Strategy](#permission-strategy) for details
-- [ ] Migration path from previous versions is tested - only incremental migration is supported (if a user wants to go from v1.1 to v1.4, they must execute v1.2 and v1.3 first)
-- [ ] **Pre-install and Post-install commands security**: If using `pre-install-cmd` or `post-install-cmd`, ensure specific version tags (no `:latest`) and proper user permissions (`--user $PUID:$PGID` when writing to user directories)
+- [ ] **First-run setup is declared, not scripted**: files the app needs ship in `seed/`, generated credentials go under `x-compose-app.secrets`, and one-shot containers under `x-compose-app.init`. A `pre-install-cmd` is a last resort for genuinely imperative work. See [First-run setup](#first-run-setup)
+- [ ] **Directories the app needs are declared** under `x-compose-app.folders` with `schema_version: 2`, not created by a hook. See [Maison and `x-compose-app`](#maison-and-x-compose-app)
+- [ ] **If an install hook survives**, it is idempotent (it reruns on every reinstall and upgrade), pins every image tag, and uses `--user $PUID:$PGID` when writing to user directories. A hook that exits non-zero leaves the app installed but **stopped**
+- [ ] **Deployment values are references, not literals**: the shared network is declared as `name: ${APP_NET:-pcs}` (never a bare `name: pcs`), and every bind source starts with `${DATA_ROOT:-/DATA}`. Maison copies the compose byte-for-byte and never rewrites it, so a literal freezes the app to one deployment. See [System Variables](#system-variables)
+- [ ] **Only services that need outside reachability are on the shared network**, and each of them has an app-prefixed service name and `container_name`. Siblings that only talk to each other belong on an app-internal `driver: bridge` network. See [Shared-network hygiene](#caddy-integration-web-ui-access)
 
 ### Security Checklist
-- [ ] Default authentication (Basic Auth, OAuth, etc.) is enabled and documented - exceptions must be explained in rationale.md (e.g., public websites)
-  - Example of valid exception: 
+- [ ] An authentication method is enabled and documented - this is **mandatory**. Exceptions must be explained in rationale.md (e.g., public websites).
+  - **Recommended**: OIDC via the **AppShield** sidecar (`ghcr.io/yundera/appshield`, formerly `nginx-hash-lock`), which auto-registers with the PCS's `auth-registrar` and protects the app with the built-in Authelia SSO. See [OIDC Authentication](#oidc-authentication-recommended) for the minimal setup, and copy a recently-shipped app (e.g. `Apps/ConvertX`, `Apps/Spliit`, `Apps/BrowserMCP`) as a reference deployment.
+  - Acceptable alternatives: Basic Auth, the app's own built-in auth (e.g. Jellyfin, Immich onboarding), or any other login gate that is enabled by default.
+  - Example of valid exception:
     - A public website that does not require authentication
-    - The app handle authentication configuration on first launch via an onboarding process (eg Jellyfin, Immich, etc.)
+    - The app handles authentication configuration on first launch via an onboarding process (e.g. Jellyfin, Immich)
 - [ ] No hardcoded credentials in the compose file - use environment variables or secrets
 - [ ] Specific version tag (no `:latest`)
 
 ### Functionality Checklist
-- [ ] Works immediately after installation - no need to check logs or run commands - pre-install scripts create sensible defaults
+- [ ] Works immediately after installation - no need to check logs or run commands - the app's `seed/` tree and declared secrets provide sensible defaults
 - [ ] Data is mapped to appropriate `/DATA` subdirectories - if things are mapped outside of /DATA, this should be explained in rationale.md
 - [ ] No manual configuration required for basic functionality - should work out of the box
 - [ ] Data persistence requirements are met - see [Data Persistence](#data-persistence) section for details
 - [ ] CPU field cpu_shares is set appropriately (on all services)
 - [ ] fresh installation tested
 - [ ] uninstall/reinstall tested - An application should be able to be uninstalled and reinstalled without losing user data or configuration (See the keep user data option when uninstalling)
+- [ ] Upgrade from previous version tested - installing the new version on top of existing `/DATA/AppData/[AppName]/` data from a previous version must not corrupt, erase, or downgrade user data or configuration. Only incremental migration is supported (to go from v1.1 to v1.4, the user must pass through v1.2 and v1.3 first).
 
 
 ### Documentation Checklist
 - [ ] Clear description of the application
-- [ ] Volume and environment variable descriptions
-- [ ] Icon and screenshots meet specifications - files and URLs point to this Yundera repository (eg https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Duplicati/thumbnail.png)
+- [ ] A mount that exposes a broad slice of `/DATA` (`/DATA/Documents`, `/DATA/Downloads`, `/DATA/Media`, `/DATA/Gallery`, or `/DATA` itself) is called out — in the app `description`, in `tips.before_install`, or in `rationale.md`. The user has to be able to see what the app can reach before they install it
+- [ ] An app that needs inbound connections from the internet (it publishes a non-HTTP `ports:` entry) carries the `needs-public-ip` tag. See [Publishing host ports](#publishing-host-ports)
+- [ ] `icon.png` and at least one screenshot are present and meet specifications - files and URLs point to this Yundera repository (eg https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Duplicati/screenshot-1.png). `thumbnail.png` is optional: supply a purpose-made tile or omit it and let the store fall back to `screenshot-1.png`
 
 ## Testing and Submit Process
 
@@ -45,7 +52,7 @@ To ensure easy testing, please follow these steps:
 
 1. Start with a regular compose app, which is a directory containing a `docker-compose.yml` file. Test it on your own machine to ensure you can start it successfully. In your instance, you can edit the compose file with a text editor and restart the app to check if the changes work. Use SSH to do `docker compose up -d` if needed.
 
-2. Copy the docker compose to an instance of CasaOS, e.g., `/DATA/AppData/casaos/apps/MyApp/docker-compose.yml`. Add all the required CasaOS-specific fields (x-casaos metadata, etc.) and test from the instance using SSH and the `docker compose up -d` command.
+2. Copy the compose onto a PCS under the app's own folder, e.g. `/DATA/AppData/MyApp/docker-compose.yml`, add the required metadata (`x-casaos`, `x-compose-app`), and test it there over SSH with `docker compose up -d`. A hand-run `docker compose up -d` in the app's folder is exactly what Maison does — it copies your `docker-compose.yml` byte-for-byte and never edits it; the only things it adds are the app's `.env` (the deployment's variables) and `docker-compose.override.yml` (the extra domains it publishes on). So if it works by hand with a real `.env`, it works as an installed app. Step 4 still proves the listing itself — metadata, icon, `seed/` tree.
 
 3. When the local setup is stable, push to your forked repo. Create a new directory under `Apps` with your app name (along with logo, screenshot, and description files), e.g., `MyApp`.
 
@@ -63,29 +70,69 @@ To ensure easy testing, please follow these steps:
 
 ## Guidelines
 
+### Rationale (`rationale.md`)
+
+When an app deviates from the default requirements, it must ship a `rationale.md` file **alongside its `docker-compose.yml`** (i.e. `Apps/[AppName]/rationale.md`). Reviewers read this file first when the compose file raises a flag.
+
+**When a `rationale.md` is required:**
+- The app runs as `user: 0:0` or exposes volumes outside `/DATA/AppData/[AppName]/` and `/DATA/[user-dir]/`.
+- The app ships with authentication disabled, or relies on the app's own first-launch onboarding instead of an enabled default.
+- The app uses a root container with mixed access to user directories and AppData (see [Mixed Usage Applications](#permission-strategy)).
+- Any other explicit deviation from this document.
+
+**Recommended structure** (see `Apps/Stirling-PDF/rationale.md` for a full worked example):
+
+```markdown
+# [AppName] — Rationale
+
+## What deviation / exception is being requested
+<Concrete, e.g. "runs as root", "auth disabled", "mounts /DATA/Downloads as rw">
+
+## Why it is necessary
+<Technical reason — upstream constraints, runtime requirements, etc.>
+
+## Security mitigations in place
+<Resource limits, container isolation, disabled features, read-only mounts, etc.>
+
+## Alternatives considered and rejected
+<Each alternative + why it didn't work>
+
+## Data protection
+<What protects user data given this exception>
+```
+
+Keep it factual and short — reviewers should be able to decide in a minute.
+
 ### Data Persistence
 
 Applications must be designed to preserve user data across uninstallation and reinstallation cycles. This ensures users never lose their personal data when updating or reinstalling applications.
 
 **Requirements:**
 - **Persistent Volume Mapping**: All user data, configurations, and databases must be stored in volumes mapped to `/DATA/AppData/[AppName]/`
-- **Graceful Data Reuse**: Applications must detect and reuse existing data when reinstalled
+- **Graceful Data Reuse**: Applications must detect and reuse existing data when reinstalled. In practice this is a property of the app's **install hook**: it runs again on every reinstall and every upgrade, so anything that only makes sense once must be guarded by an existence check
 - **No Data Erasure**: Container startup processes must never erase or overwrite existing user data
 - **Configuration Preservation**: Settings, user accounts, and preferences should persist across container lifecycle
 
 **Implementation Guidelines:**
 - Map all persistent data to `/DATA/AppData/[AppName]/` subdirectories
-- Use initialization scripts that check for existing data before creating defaults
+- Use initialization scripts that check for existing data before creating defaults — and remember `&&` chains propagate the failure: one initialiser refusing to overwrite an existing file takes the whole hook down with it
 - Ensure database migrations are handled gracefully on version updates
 - Test uninstall/reinstall scenarios to verify data persistence
 
 **Example Volume Mapping:**
 ```yaml
 volumes:
-  - /DATA/AppData/myapp/config:/app/config
-  - /DATA/AppData/myapp/database:/var/lib/database
-  - /DATA/AppData/myapp/uploads:/app/uploads
+  - ${DATA_ROOT:-/DATA}/AppData/myapp/config:/app/config
+  - ${DATA_ROOT:-/DATA}/AppData/myapp/database:/var/lib/database
+  - ${DATA_ROOT:-/DATA}/AppData/myapp/uploads:/app/uploads
 ```
+
+Write the bind source as `${DATA_ROOT:-/DATA}/…`, not a bare `/DATA/…`. The data
+folder is `/DATA` on a PCS but not on every deployment, and a bind source is resolved
+by the **host** daemon — so the reference is what makes the app portable. The `:-/DATA`
+default keeps the compose working when you run it by hand. See
+[System Variables](#system-variables). Elsewhere in this document `/DATA/...` is used
+as shorthand for the data folder itself; in a bind source, always write the variable.
 
 This approach ensures that when users uninstall and reinstall applications, they can continue from where they left off without losing any personal data or configurations.
 
@@ -228,7 +275,15 @@ It is mandatory to set CPU shares for all services in your compose file. This he
 
 CPU shares determine relative CPU priority between containers. Higher values get more CPU time when the system is under load.
 
-**Formula:** `cpu_shares: [value]` (relative weight, not percentage)
+**Placement:** `cpu_shares` is a **top-level service field**, not part of `deploy:`. The value is a relative weight, not a percentage.
+
+```yaml
+services:
+  myapp:
+    image: myapp:1.2.3
+    cpu_shares: 70          # ← top level of the service
+    # deploy.resources is for memory/cpu limits, not cpu_shares
+```
 
 #### CPU Share Allocation:
 ```
@@ -297,7 +352,9 @@ App-Name
 ├─ screenshot-1.png     # (Required) At least one screenshot is needed to demonstrate the app runs on CasaOS successfully
 ├─ screenshot-2.png     # (Optional) More screenshots to demonstrate different functionalities are highly recommended
 ├─ screenshot-3.png     # (Optional) ...
-└─ thumbnail.png        # (Required) A thumbnail file is needed if you want it to be featured in AppStore front (see specification at bottom)
+├─ thumbnail.png        # (Optional) Purpose-made tile image for the AppStore listing. Used for featured apps; when absent the store falls back to screenshot-1.png (see specification at bottom)
+├─ seed/                # (Optional) The app's initial data tree, mirroring /DATA/AppData/<app>/
+└─ rationale.md         # (Conditional) Required when the app needs a documented exception — see "Rationale" below
 ```
 
 #### An App is a Docker Compose app, or a *compose app*
@@ -339,24 +396,28 @@ Each directory under [Apps](Apps) corresponds to a Compose App. The directory sh
         source: /DATA/AppData/$AppID/config # $AppID = app name, e.g. syncthing
     ```
 
-- **System Variables**: CasaOS provides additional system-wide variables for enhanced functionality. These environment variables are automatically injected by CasaOS at container creation:
+- **System Variables**: Yundera injects the following variables at container creation. Reference them in `environment:`, `volumes:`, `labels:`, and `pre-install-cmd`:
 
     ```yaml
     environment:
-      # Standard system variables
-      PGID: $PGID                                    # Preset Group ID
-      PUID: $PUID                                    # Preset User ID
-      TZ: $TZ                                        # Current system timezone
+      # User / system
+      PGID: $PGID                           # Preset Group ID
+      PUID: $PUID                           # Preset User ID
+      TZ: $TZ                               # Current system timezone
 
-      # V2 system variables (recommended)
-      PCS_DEFAULT_PASSWORD: $PCS_DEFAULT_PASSWORD    # Secure default password generated by CasaOS
-      PCS_DOMAIN: $PCS_DOMAIN                        # Domain without https:// (e.g., example.com)
-      PCS_DATA_ROOT: $PCS_DATA_ROOT                  # Data root directory (/DATA)
-      PCS_PUBLIC_IP: $PCS_PUBLIC_IP                  # Public IP for port binding and announcements
-      PCS_EMAIL: $PCS_EMAIL                          # Admin email (admin@DOMAIN)
+      # App identity & networking
+      APP_DOMAIN: $APP_DOMAIN               # Domain root for this app (e.g. user.nsl.sh)
+      APP_PUBLIC_IP_DASH: $APP_PUBLIC_IP_DASH  # Public IPv4 with dashes, for nip.io / sslip.io
+      APP_DEFAULT_PASSWORD: $APP_DEFAULT_PASSWORD  # Secure default password generated by Yundera
+      APP_EMAIL: $APP_EMAIL                 # Admin email (admin@DOMAIN)
     ```
 
-    **Note:** The V2 variable names (prefixed with `PCS_`) are the current standard. Use these in new applications for consistency across the CasaOS ecosystem.
+    Typical usage — publishing the app's own URL back to itself (e.g. for OAuth callbacks, email links, CORS):
+
+    ```yaml
+    environment:
+      BASE_URL: https://myapp-${APP_DOMAIN}
+    ```
 
 - CasaOS specific metadata, also called *store info*, are stored under the [extension](https://docs.docker.com/compose/compose-file/#extension) property `x-casaos`.
 
@@ -399,45 +460,399 @@ x-casaos:
         Default Account
         | Username   | Password                |
         | --------   | ----------------------- |
-        | `admin`    | `$PCS_DEFAULT_PASSWORD` |
+        | `admin`    | `$APP_DEFAULT_PASSWORD` |
 ```
 
 ### Features
 
-CasaOS supports additional configuration options for enhanced app management:
+Apps are configured through two extension blocks: `x-casaos`, inherited from the
+CasaOS store format, and `x-compose-app`, read by Yundera's own dashboard.
 
-#### Pre-Installation Commands
+#### Maison and `x-compose-app`
 
-You can specify commands to run before container startup using `pre-install-cmd`. This command executes before all other containers are started:
+Yundera's dashboard is **Maison**. It consumes the unmodified CasaOS `x-casaos`
+block, so every existing store app keeps working unchanged — but it also reads its
+own Compose extension, `x-compose-app`, and **prefers it for every field it
+defines**, falling back for anything it omits:
 
-```yaml
-x-casaos:
-    pre-install-cmd: docker run --rm -v /DATA/AppData/$AppID/:/data/ -e PASSWORD=$default_pwd nasselle/pre-install-toolbox:1.0.0 https://example.com/init.sh
+```
+x-compose-app  →  x-casaos  →  runtime derivation
 ```
 
-When using `pre-install-cmd`, ensure the command is idempotent and does not require user interaction.
-Also ensure that versions are specified for any images used in the command to avoid unexpected changes.
+Maison reads the **app-level** `x-casaos` block. It does *not* read the per-service
+`x-casaos.envs` / `x-casaos.volumes` / `ports` / `devices` description lists that the
+CasaOS UI used to render as a per-field config form — the struct is parsed and then
+never consumed, so those `description:` entries reach no user. **Don't write them in
+new apps.** They survive in a handful of older apps (`Apps/FileBrowser`,
+`Apps/Stremio`) as inert metadata; leave them alone rather than churning the files.
+Anything a user genuinely needs to know before installing belongs in the app
+`description`, in `tips.before_install`, or in `rationale.md`.
 
-**SECURITY REQUIREMENTS for pre-install-cmd:**
-- [ ] **Specific version tags**: Never use `:latest` - always specify exact versions (e.g., `alpine:3.19`, `ubuntu:22.04`)
-- [ ] **User specification**: Use `--user $PUID:$PGID` when creating files in user directories to ensure proper permissions
-- [ ] **Idempotent operations**: Commands should be safe to run multiple times
-- [ ] **No hardcoded credentials**: Use system variables like `$PCS_DEFAULT_PASSWORD`
+Most apps in this store already carry an `x-compose-app` block. Its load-bearing
+keys are **`folders`**, **`secrets`**, **`variables`**, **`files`**, **`init`** and
+**`hooks`** — plus the `seed/` folder beside the compose file, which needs no key at
+all. Declare `schema_version: 2`, which is what `folders` and `hooks` ask for; the
+rest are additive and do not raise it.
 
-Example:
-```yaml
-x-casaos:
-  pre-install-cmd: |
-    docker run --rm -v /DATA/AppData/filebrowser/db/:/db filebrowser/filebrowser:v2.32.0 config init --database /db/database.db &&
-    docker run --rm -v /DATA/AppData/filebrowser/:/data ubuntu:22.04 chown -R $PUID:$PGID /data &&
-    docker run --rm -v /DATA/AppData/filebrowser/db/:/db filebrowser/filebrowser:v2.32.0 users add admin $PCS_DEFAULT_PASSWORD --perm.admin --database /db/database.db
+`folders` is documented below; the other four are in
+[First-run setup](#first-run-setup), which is where to start when your app needs
+anything on its first boot.
+
+##### The stack-up sequence
+
+Everything below hangs off one sequence, and **every** `docker compose up` Maison
+runs goes through it — install, start from the tile, store update, and saving the
+app's config alike:
+
+```
+folders → secrets → variables → init(pre_up) → seed → files
+        → pre_up  →  docker compose up -d  →  init(post_up) → post_up
 ```
 
-**Common use cases:**
-- Create default configuration files
-- Set up initial data structures
-- Generate certificates or keys
-- Prepare the environment with sensible defaults
+`pre_install` / `post_install` bracket that sequence, but only on the install itself:
+
+```
+write compose + .env + the seed tree  →  ensure folders  →  pull images
+                      →  pre_install  →  [ the up sequence ]  →  post_install
+```
+
+Everything before `docker compose up` is **fatal** on failure: an app whose secret
+could not be generated or whose config could not be rendered must not start.
+
+The ordering is the part to internalise: **a directory declared under `folders`
+exists, owned correctly, before any image is pulled, before any hook runs, and
+before the containers start** — on the first boot and on every boot after it.
+
+##### `folders` — the directories your app needs
+
+Compose creates a missing bind-mount source as an empty **root-owned** directory. An
+app that drops privileges to `PUID:PGID` then can't write to its own config volume:
+the classic "permission denied on first start". `folders` fixes that declaratively.
+
+```yaml
+x-compose-app:
+  schema_version: 2
+  folders:
+    - /DATA/AppData/$AppID/config            # shorthand: this path, all defaults
+    - path: /DATA/AppData/$AppID/data        # full form
+      user: $PUID
+      group: $PGID
+      mode: "0750"
+    - path: /DATA/Media
+      group: media
+      recursive: true                        # also reclaim what is already inside
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `path` | — (required) | Absolute host path, under `/DATA`. Interpolated with the app's variables and its `.env`. |
+| `user` | `$PUID` | Owning user. |
+| `group` | `$PGID` | Owning group. |
+| `mode` | `"0755"` | Permissions of `path` itself. **Must be quoted.** |
+| `recursive` | `false` | Apply `user`/`group` to everything already inside `path`, not just `path`. |
+
+**Maison does not read `volumes:` and guess.** A compose file says nothing about
+whether a bind source is meant to be a directory or a config file, and every
+heuristic for it — a trailing `/`, a dot in the last segment — is wrong in one
+direction or the other. So a directory your app needs is a directory your app
+**declares**; anything undeclared is left to Docker exactly as it would be outside
+Maison. This is the one real porting step for an app coming from a CasaOS store:
+its bind mounts work, but any directory needing `PUID:PGID` ownership before first
+start has to be listed here.
+
+Three things are declaration *errors* that fail the up rather than being skipped: a
+variable that resolves to nothing, a relative path, and a path outside `/DATA`.
+Ownership and mode are applied best-effort — a filesystem that can't `chown` logs a
+warning rather than blocking an otherwise healthy start.
+
+`mode` must be quoted. Unquoted, YAML types it as an octal *int* and the leading
+zero is gone before Maison ever sees it:
+
+```yaml
+mode: "0750"   # ✅
+mode: 0750     # ❌ rejected — Maison names the fix rather than guessing what 488 meant
+```
+
+Use `recursive: true` only when the app must reclaim a tree it didn't create — a
+restored backup, a media library another app wrote, a directory an earlier
+root-running version left behind. The walk is proportional to the size of the tree,
+so keep it off multi-terabyte media folders that are already correct. It rewrites
+**ownership only**; `mode` still applies to `path` itself and nothing below it.
+
+##### `hooks` — shell around the lifecycle
+
+| Hook | Runs |
+|---|---|
+| `pre_install` | Once, at install: after images are pulled, before the first up. |
+| `post_install` | Once, right after that first up succeeds. |
+| `pre_up` | Before **every** up — install, every later start, update, and config save. |
+| `post_up` | After every up. |
+
+```yaml
+x-compose-app:
+  schema_version: 2
+  hooks:
+    pre_install: |
+      # Generating a key here is exactly what `secrets:` is for — see First-run
+      # setup. What belongs in a hook is imperative work: waiting on a program,
+      # patching what it wrote, or reaching the host.
+      docker exec other-stack /usr/bin/reload-config
+    post_up: |
+      echo "$AppID up at $(date)" >> /var/log/maison-apps.log
+```
+
+`pre_install` / `post_install` generalise the CasaOS `pre-install-cmd` /
+`post-install-cmd` and **win over them** when both are present. An app carrying only
+`x-casaos` keeps working with no change, which is why the few hooks left in this
+store are still written as `pre-install-cmd` — both run through the same machinery
+and the requirements in
+[Install hooks](#install-hooks-pre-install-cmd--the-last-resort) apply identically.
+
+**Failure semantics.** `pre_install` and `pre_up` are **fatal**: a pre-hook is the
+app's precondition, and if it doesn't hold the stack must not start. Note what that
+means for `pre_up` — a flaky one blocks the app on *every* start. `post_install` and
+`post_up` are logged and swallowed, because tearing a healthy app back down over a
+failed after-the-fact tweak would be worse than the failed tweak.
+
+**Where hooks run.** Through `/bin/bash -c` **inside the Maison container**, with the
+working directory set to the app's folder, but talking to the **host** Docker daemon
+via `DOCKER_HOST`. They get the app's interpolation variables plus its `.env`,
+`AppID`, and `APP_DIR`. Because they're aimed at the host daemon, `/DATA` and
+`${DATA_ROOT}` references in a hook name **host** paths — so a `docker run -v` in a
+hook must name a path the host daemon can resolve.
+
+**Reaching the app's `.env`.** `$APP_DIR` is the app's folder and is already the
+working directory, so the env file Maison prefills is `$APP_DIR/.env`:
+
+```yaml
+    pre_install: |
+      # Append, never truncate: Maison has already written APP_DOMAIN, PUID,
+      # PGID, APP_DEFAULT_PASSWORD and APP_NET into this file. A bare `>` wipes
+      # them and the app installs with an empty environment.
+      grep -q '^MYAPP_SECRET=' $APP_DIR/.env ||
+        printf 'MYAPP_SECRET=%s\n' "$(cat /DATA/AppData/$AppID/secrets/key)" >> $APP_DIR/.env
+```
+
+> There is **no** `/DATA/AppData/casaos/apps/<id>/.env`. That was CasaOS's layout;
+> Maison does not use it, and a hook writing there silently succeeds while the app
+> never sees the value.
+
+> **Don't `mkdir` in a hook.** That path is a host path, but the `mkdir` itself runs
+> in the Maison container — creating the wrong directory in the wrong place. Declare
+> it under `folders` instead: those are created through Maison's data mount and are
+> correct on both sides. Hooks are for **Docker-level** work — priming a volume with
+> `docker run`, pulling a sidecar image, poking another stack. Directories are what
+> `folders` is for.
+
+##### `webui-host` — the click URL
+
+CasaOS asks for a container port and *derives* a hostname at install time.
+`x-compose-app` instead lets you declare the **final URL**, so the tile's link and
+the app's Caddy route are the same string:
+
+```yaml
+services:
+  myapp:
+    labels:
+      caddy_0: myapp-${APP_DOMAIN}         # the route
+x-compose-app:
+  webui-host: myapp-${domain}              # the click URL host — same shape
+  webui-path: /
+```
+
+| Field | Default | Meaning |
+|---|---|---|
+| `webui-host` | — | The URL host. Omit for a headless app — its tile gets no open action. |
+| `webui-path` | `/` | Path appended to the host; may include a query string. |
+| `webui-scheme` | `https` | The scheme the **browser** uses. |
+| `webui-port` | `""` | The **URL** port, not the container port. Empty in the normal gateway case. |
+
+`${domain}` / `${DOMAIN}` are resolved on every render, so the URL tracks a domain
+change and works for apps Maison never installed. Keeping `webui-host` identical to
+the `caddy_0` label also matters for route generation: Maison clones the app's Caddy
+route group onto every additional domain the deployment answers on, so the click URL
+keeps mirroring the route it was cloned from.
+
+##### `view` — which grid the tile lands in
+
+```yaml
+x-compose-app:
+  view: system        # apps (default) | system | hidden
+```
+
+`view: system` also **protects** the app — Maison refuses Stop and Uninstall (Restart
+and Start stay available, so a wedged platform app is still recoverable without SSH)
+and skips it in scheduled backups. It is a foot-gun guard, not a security boundary:
+the app declares it about itself. Reserve it for platform pieces; ordinary apps
+should leave `view` alone.
+
+##### Keys Maison writes itself
+
+`store` / `store-app-id` and `generated-routes` show up in an *installed* app's
+override file. They are Maison's own bookkeeping — don't use those names for
+author fields.
+
+#### First-run setup
+
+Most of what an app needs on its first start is a **declaration**, not a script.
+Reach for a hook only when nothing below fits.
+
+**1. Files — ship them in `seed/`.**
+
+`Apps/[AppName]/seed/` mirrors the app's own folder, so a path in the store *is*
+the path on disk. Nothing is declared anywhere: Maison copies the tree into the
+app folder at install and writes each file out **create-if-absent on every up**,
+so a missing file is restored and a file the app or the user edited is left alone.
+
+```
+Apps/MyApp/seed/config/init.sql          → /DATA/AppData/myapp/config/init.sql
+Apps/MyApp/seed/config/app.yml.tmpl      → /DATA/AppData/myapp/config/app.yml
+```
+
+A `.tmpl` suffix is rendered with the app's variables (and stripped from the
+name); anything else is copied byte-for-byte, so binaries and SQL dumps are safe.
+The exec bit survives. An unresolved `${VAR}` **fails the install** rather than
+writing the literal into a config file. `docker-compose.yml`, its override and
+`.env` may not appear in a seed tree.
+
+This replaces fetching assets over jsDelivr or `raw.githubusercontent.com`: the
+store is already downloaded and extracted on the box, so a seed file needs no
+network, no CDN purge, and no wait for the commit to land on `main`.
+
+**2. Credentials — declare them under `secrets`.**
+
+```yaml
+x-compose-app:
+  schema_version: 2
+  secrets:
+    MYAPP_SECRET_KEY: hex:32                        # 32 bytes → 64 hex chars
+    MYAPP_ADMIN_HASH: bcrypt:${APP_DEFAULT_PASSWORD}
+  variables:
+    MYAPP_URL: https://myapp-${APP_DOMAIN}          # re-rendered on every up
+```
+
+Generators: `hex:N`, `base64:N`, `alnum:N`, `password:N`, `uuid`,
+`bcrypt:TEXT`. A secret is generated **once** into the app's `.env` and never
+regenerated, so it survives restarts, updates and restores; from there it is an
+ordinary variable that compose resolves and a `.tmpl` can reference.
+
+Do not generate credentials in a shell hook. `openssl` is not in the runtime, and
+`"$(openssl rand -hex 32)"` yields an empty string while the hook still exits 0 —
+that is how apps shipped empty secrets.
+
+**3. A file that must track the deployment — `files`.**
+
+`seed/` is create-if-absent, which is right for almost everything. When a config
+embeds a deployment value that can change (a domain, a URL), declare it instead so
+it is re-rendered on every up:
+
+```yaml
+x-compose-app:
+  files:
+    - path: /DATA/AppData/myapp/element/config.json
+      from: element/config.json.tmpl    # a path in the app's seed/ tree
+      ensure: always                    # `once` (default) = create-if-absent
+      mode: "0640"                      # quote the octal
+```
+
+**4. Work that needs a container — `init`.**
+
+Seeding a database with the app's own binary, or computing a value only some tool
+can produce. Declared, not shelled out to:
+
+```yaml
+x-compose-app:
+  init:
+    - name: init-db
+      image: filebrowser/filebrowser:v2.63.2
+      user: $PUID:$PGID
+      volumes:
+        - /DATA/AppData/$AppID/db:/db      # host-spelled, like any bind mount
+      command: config init --database /db/database.db
+      when: absent:/DATA/AppData/$AppID/db/database.db   # or `once` / `always`
+    - name: obscure-password
+      image: rclone/rclone:1.73.3
+      command: ["obscure", "$APP_DEFAULT_PASSWORD"]
+      capture: RCLONE_PASS      # stdout → usable in a .tmpl and in `files`
+```
+
+`when:` replaces the hand-written `if [ ! -f ]` every one of these used to open
+with, and `when: once` is remembered inside the app folder, so it travels with the
+app's backup. A failing step before the stack starts **fails the install**, loudly.
+Add `phase: post_up` (and `network:`) for a seeder that needs the app running.
+
+**Requirements:**
+- [ ] **Specific version tags** on every `init` image — never `:latest`.
+- [ ] **No hardcoded credentials**: use `$APP_DEFAULT_PASSWORD` and friends.
+- [ ] **Directories** come from `x-compose-app.folders`, not from a seed file's
+      parent or a `mkdir` — folders is the one place a directory's owner is stated.
+- [ ] **`--user`/`user:`** whenever files land under `/DATA/Documents`,
+      `/DATA/Downloads`, `/DATA/Media` or `/DATA/Gallery`.
+
+#### Install hooks (`pre-install-cmd`) — the last resort
+
+Everything above exists because the work these hooks were doing was declarative
+all along. What is left for a hook is genuinely imperative: waiting on another
+program to write its own config and then patching it (`Apps/Seafile`), merging a
+key set nobody can name in advance (`Apps/Hubs`), or changing the **host**
+(`Apps/ClaudeCodeRoot`). If your app is not one of those, you do not need a hook.
+
+> **It does not run on the host.** The hook runs `/bin/bash` **inside the Maison
+> container**, with the app's folder as the working directory — but its `docker`
+> client talks to the **host** daemon, so every container the hook starts is a real
+> container on the real machine. That seam is how a hook reaches the host, and it
+> is the only way it does.
+
+**The command set.** A hook may call these, and nothing else:
+
+```
+bash sh docker
+cat chmod chown cp cut date dirname echo env expr find grep head id install
+ln ls md5sum mkdir mktemp mv od printf readlink realpath rm rmdir sed seq
+sha256sum sleep sort stat tail tee test timeout touch tr uniq wc wget xargs
+```
+
+Anything else fails the install with a message naming the alternative. Two groups
+are deliberately excluded, both because without this they failed *silently*:
+
+- **`openssl`, `curl`, `python`, `jq`, `git`, `unzip`** — not in the container.
+  A missing command inside `"$(...)"` is not an error in bash: it yields an empty
+  string and the hook still exits 0. Apps shipped empty secrets this way — which
+  is what `secrets:` above is for.
+- **`sysctl`, `ip`, `mount`, `adduser`, `modprobe`, `chroot`, `reboot`** and
+  ~25 other busybox applets — present, but scoped to the container, whose
+  namespaces and user database vanish on restart. They appear to work and change
+  nothing.
+
+A hook that writes into `/DATA` has one more trap: its `/DATA` is rewritten to the
+**host** spelling, while the shell itself runs in the Maison container. Use `seed/`
+or `files` for anything that is just a file; they are written container-side and
+are correct on both sides of the socket.
+
+**Changing the host.** Legitimate and supported — it goes through the Docker
+socket the hook already holds. Pin the image tag, and justify the access in the
+app's `rationale.md`; a reviewer will ask.
+
+| To change | Recipe |
+|---|---|
+| Kernel parameters | `docker run --rm --privileged --network=host <image> sysctl -w <key>=<value>` |
+| Network state | `docker run --rm --privileged --network=host <image> ip ...` |
+| Files, users, `/etc` | `docker run --rm -v /:/host <image> chroot /host sh -c '...'` |
+| Filesystems, devices | `docker run --rm --privileged -v /:/host <image> chroot /host mount ...` |
+| Kernel modules | `docker run --rm --privileged <image> modprobe ...` |
+
+`sysctl` needs **both** flags: `--privileged` for a writable `/proc/sys`, and
+`--network=host` because `net.*` keys are per-namespace. Host *service* management
+(`systemctl`, `snap`) has no verified recipe — don't rely on it from a hook.
+
+**If you do ship a hook:**
+- [ ] **Idempotent**: it reruns on every reinstall and every version upgrade. Guard
+      one-shot work behind an existence check — a hook that exits non-zero leaves
+      the app installed but **stopped**.
+- [ ] **Non-interactive**: it must not prompt.
+- [ ] **Pinned images**, no `:latest`, and `--user $PUID:$PGID` when writing to
+      user directories.
+- [ ] **Host changes justified** in `rationale.md`, using one of the recipes above.
 
 #### Caddy Integration (Web UI Access)
 
@@ -455,7 +870,7 @@ The Yundera AppStore uses Caddy reverse proxy with Docker labels for automatic H
 **Label Format (Required for all Web UI apps):**
 ```yaml
 labels:
-  # 1. Gateway-routed domain (mesh router) - Custom CA
+  # 1. Gateway-routed domain - Custom CA
   caddy_0: appname-${APP_DOMAIN}
   caddy_0.import: gateway_tls
   caddy_0.reverse_proxy: "{{upstreams 80}}"
@@ -473,14 +888,43 @@ labels:
 **Notes:**
 - `caddy_2` does NOT have `import: gateway_tls` - uses Let's Encrypt
 - Replace `80` with your app's actual web UI port
-- Add labels only to the main web UI service
-- Ensure the `pcs` network is configured
+- Ensure the `pcs` network is declared as shown below
 
 **Compose File Requirements:**
 - Use `expose` to expose the web UI port (required for Caddy discovery)
-- Add Caddy labels to the main web UI service only
-- Connect the main service to the `pcs` network
+- Add Caddy labels to every service that answers on its own hostname. Most apps have exactly one; an app that also ships, say, its own Dex has two, and each gets its own `caddy_N` group on its own service
+- Declare the shared network yourself, and connect **every service that must be reachable from outside your own compose project** to it — anything with Caddy labels, plus anything another app talks to. Services that only talk to their siblings do not belong on it (see *Shared-network hygiene* below):
+
+  ```yaml
+  networks:
+    pcs:                       # the key is yours; the name is the deployment's
+      name: ${APP_NET:-pcs}
+      external: true
+  ```
+
+  Write `${APP_NET:-pcs}`, never a bare `pcs`. Maison copies your `docker-compose.yml` byte-for-byte and does not rewrite it, so the reference is what lets the same app run on a deployment whose network is called something else — and the `:-pcs` default keeps a bare `docker compose up` working when you test by hand
 - Use `${APP_DOMAIN}` and `\${APP_PUBLIC_IP_DASH}` variables
+- Set `container_name` explicitly on every service you attach to `pcs`. Caddy resolves each label's upstream via container DNS on that network, so the container must have a stable, predictable name. Constraints:
+  - lowercase alphanumerics and `-` only (no underscores, dots, or other special characters)
+  - must **not** start with a digit
+  - should match the top-level `name:` and service name for consistency
+
+**Shared-network hygiene:**
+
+`pcs` is one flat network shared by every app on the box, and its DNS namespace is
+shared with them. Compose gives each attached service an alias equal to its **service
+name**, and Docker also resolves **container names** — so two apps that each attach a
+service called `db` will cross-resolve, and one app's web tier can end up talking to
+another's database. It is rare in practice only because names differ.
+
+Two rules keep it that way:
+
+- **Attach only what needs outside reachability.** A database, a cache or a worker that
+  only its own siblings talk to belongs on an app-internal network (`driver: bridge`),
+  not on `pcs`. Services on the same compose project reach each other by service name
+  without either.
+- **Prefix what you do attach.** Give every service on `pcs` an app-prefixed service
+  name and `container_name` (`outline-dex`, not `dex`).
 
 **Example - Complete Caddy Configuration:**
 ```yaml
@@ -505,7 +949,7 @@ services:
 
 networks:
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
 
 x-casaos:
@@ -539,7 +983,7 @@ services:
 
 networks:
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
 
 x-casaos:
@@ -551,6 +995,64 @@ x-casaos:
 - Configure applications to use port 80 when possible
 - Any port works with Caddy - just match the `expose` and label port values
 - The URL remains clean regardless of the backend port
+
+#### Publishing host ports
+
+`expose:` is the default and covers every HTTP port: Caddy reaches the container over
+the shared network, so publishing a web UI to the host adds nothing but a second door
+that bypasses Caddy, the certificates, and the app's login gate. **Never publish a web
+UI port** — and on an AppShield app, never publish the protected backend's HTTP port.
+
+**`ports:` is legitimate — and sometimes required — for traffic Caddy cannot carry.**
+An HTTP reverse proxy can only front HTTP. If your app speaks a protocol that peers or
+clients must reach directly, publish that port and say so. Shipped examples:
+
+| App | Published | Why |
+|---|---|---|
+| `Apps/Crafty` | `25500-25600/tcp`, `19132/udp` | Minecraft Java + Bedrock — game protocol, not HTTP |
+| `Apps/Hubs` | `40000-40050/tcp+udp` | WebRTC media |
+| `Apps/Samba` | `445/tcp` | SMB |
+| `Apps/WireGuardEasy` | `51820/udp` | WireGuard |
+| `Apps/AnnasTorrents` | `6881/tcp+udp` | BitTorrent peer + DHT traffic |
+| `Apps/qBittorrent` | `6881/tcp+udp` (shipped commented out) | same, but the client is usable without it |
+
+When you do publish:
+
+- Publish **only** the non-HTTP port(s). The web UI stays on `expose:` behind Caddy.
+- Pick fixed, documented ports and keep them out of the way of the host itself
+  (the PCS stack owns `80`/`443`, SSH owns `22`). Two apps that publish the same host
+  port cannot run side by side — the second one fails to start.
+- Publishing a port makes it reachable from the internet, unauthenticated, with no SSO
+  in front. That is the point for a swarm or game port; make sure it is not the point
+  for anything else the container listens on.
+- Say what the port is for in a comment next to it, and tag the app `needs-public-ip` if clients have to dial in from outside (see below).
+
+**Ship it enabled if the app needs it to work.** Comment a `ports:` block out only when
+the app is genuinely useful without it and the port is a pure enhancement — and then say
+so in `tips.before_install` so the user knows what to uncomment.
+
+#### Reserved tag: `needs-public-ip`
+
+Most `x-casaos.tags` are topical (`media`, `files`, `developer`, `personal`). One tag is
+**reserved and functional**: `needs-public-ip`. Add it to any app that only works
+properly when inbound connections from the internet reach the host — i.e. any app that
+publishes a port other people or devices have to dial in on.
+
+```yaml
+x-casaos:
+  category: Downloader
+  tags: ["files", "personal", "needs-public-ip"]
+```
+
+Not every PCS has a reachable public IP: a PCS behind CGNAT, or one routed through the
+mesh-router WireGuard tunnel, gets its HTTPS routes from the gateway but has **no**
+directly reachable address for raw TCP/UDP. On such a host the app installs and starts
+fine, and then quietly underperforms — a torrent client that never gets inbound peers,
+a game server nobody can join. The tag is what lets the user see that before installing.
+
+The tag is the whole requirement — no extra `tips.before_install` boilerplate is
+expected. Add a note there only if the app has something specific to say (a port to
+forward, what degrades without it).
 
 Caddy handles:
 - Automatic HTTPS certificate management
@@ -569,7 +1071,27 @@ Caddy handles:
 - Add Caddy labels only to the main web UI service (not to database or backend services)
 - The app name in the Caddy labels should be simple without spaces or special characters
 - Use `${APP_DOMAIN}` and `\${APP_PUBLIC_IP_DASH}` for portability
-- Always include the `pcs` network definition with `external: true`
+- Always include the `pcs` network definition with `external: true`, and **never set
+  `name:` on it** — see the two rules below. Both are load-bearing on a real PCS.
+
+> **Declare `pcs` without `name:`.** Write `pcs: {external: true}` and nothing more.
+> Compose resolves an external network from its key, so the wire network is still
+> `pcs` — but Maison's launcher treats an external network whose `name:` equals its
+> own key as one *it* generated, deletes the entry, and detaches it from **every**
+> service. Only `x-casaos.main` then gets the app network back. Writing
+> `name: pcs` therefore strands every other service on the compose default bridge,
+> where Docker's embedded DNS does not resolve container names.
+
+> **`x-casaos.main` must name the service carrying the `caddy_N` labels.** Maison
+> attaches the app network to that service and no other, and the tile's health
+> follows it. Point `main` at a backend and the public-facing sidecar is left off the
+> network entirely: Caddy has no upstream and every request 502s or 503s, behind a
+> tile still showing green. For an AppShield app, `main` is always the **sidecar**.
+
+> **Multi-service apps: consider an app-private bridge.** A second network shared by
+> your services (`myapp-internal: {driver: bridge}`, listed on each service alongside
+> `pcs`) keeps backend↔sidecar DNS working regardless of how the shared network is
+> rewritten. Required if your services must reach each other by name.
 
 **Example Multi-Service Configuration:**
 
@@ -596,31 +1118,156 @@ x-casaos:
     webui_port: 8080               # Must match the exposed port
 ```
 
+#### OIDC Authentication (Recommended)
+
+The recommended way to satisfy the authentication requirement is to front your app with the **AppShield** sidecar (`ghcr.io/yundera/appshield`, formerly `nginx-hash-lock`), which plugs into the PCS's built-in Authelia SSO. The sidecar self-registers as an OIDC client with the PCS's `auth-registrar` on first login — there are **no client IDs, no secrets, and no issuer URL to configure**.
+
+Reference deployments: copy a recently-shipped SSO app such as `Apps/Beacon` or `Apps/BrowserMCP` (MCP servers, with the OAuth broker) or `Apps/Spliit` (plain web UI). The live store is the source of truth — if this guide and a shipped app disagree, the app wins.
+
+**Pattern:** put the AppShield container in front of your backend, point Caddy at AppShield instead of the backend, and keep the backend reachable only on the internal `pcs` network.
+
+```yaml
+name: myapp
+services:
+  myapp:                                    # AppShield sidecar (public-facing)
+    image: ghcr.io/yundera/appshield:2.0.9
+    container_name: myapp                    # must equal top-level name: (load-bearing — see checklist)
+    hostname: myapp                          # must equal container_name — OIDC identity (load-bearing — see checklist)
+    restart: unless-stopped
+    user: "root"
+    expose:
+      - 80
+    labels:
+      caddy_0: myapp-${APP_DOMAIN}
+      caddy_0.import: gateway_tls
+      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_1: myapp-\${APP_PUBLIC_IP_DASH}.nip.io
+      caddy_1.import: gateway_tls
+      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_2: myapp-\${APP_PUBLIC_IP_DASH}.sslip.io
+      caddy_2.reverse_proxy: "{{upstreams 80}}"
+    environment:
+      # No AUTH_HASH: the platform injects no token into the app's .env, so it would
+      # resolve to an empty string. See the note under the table below.
+      BACKEND_HOST: "myapp-backend"                         # internal DNS name of the protected container
+      BACKEND_PORT: "80"                                    # port the backend listens on
+      LISTEN_PORT: "80"                                     # port AppShield listens on (matches `expose` + Caddy)
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"      # presence of this enables OIDC mode
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},\${APP_PUBLIC_IP_DASH}.nip.io,\${APP_PUBLIC_IP_DASH}.sslip.io"
+      # Optional:
+      # USER: "ADMIN"                                       # extra basic-auth gate in front of the UI
+      # PASSWORD: $APP_DEFAULT_PASSWORD
+      # ALLOWED_PATHS: "mcp"                                # paths reachable with the hash token only (MCP servers)
+      # OAUTH_RESOURCE: "https://myapp-${APP_DOMAIN}/mcp"   # OAuth 2.1 gate on that path (machine/API clients)
+      # OAUTH_SCOPE: "mcp"
+      # OAUTH_DATA_DIR: "/data/oauth"                       # mount /DATA/AppData/myapp/oauth here to persist clients
+    depends_on:
+      - myapp-backend
+    cpu_shares: 80
+    networks:
+      - pcs
+
+  myapp-backend:
+    image: myapp:1.2.3
+    container_name: myapp-backend
+    # No Caddy labels — only the AppShield sidecar is publicly reachable
+    expose:
+      - 80
+    cpu_shares: 50
+    networks:
+      - pcs
+
+networks:
+  pcs:
+    name: ${APP_NET:-pcs}
+    external: true
+
+x-casaos:
+  main: myapp                       # the SIDECAR — the service carrying the caddy_N
+                                    # labels. Never the backend: see the rules above.
+  index: /                          # launch path; the SSO gate handles authentication
+  webui_port: 80                    # optional; keep at 80 if set
+```
+
+**AppShield environment reference (OIDC mode):**
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `AUTH_HASH` | **no — legacy** | CasaOS-era per-app token. Do not set it in new apps; see the note below. |
+| `BACKEND_HOST` / `BACKEND_PORT` | yes | Internal DNS name + port of the protected container. |
+| `LISTEN_PORT` | yes | Port AppShield listens on (matches `expose` + Caddy `{{upstreams}}`). |
+| `OIDC_REGISTRAR_URL` | yes | `http://auth-registrar:9092` — enables OIDC; self-registers (no client id/secret). |
+| `REDIRECT_HOST_SUFFIXES` | yes | `${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io` — valid OIDC redirect hosts. |
+| `USER` / `PASSWORD` | optional | Extra basic-auth gate in front of the UI (e.g. `ADMIN` / `$APP_DEFAULT_PASSWORD`). |
+| `ALLOWED_PATHS` | optional | Paths reachable with just the hash token, bypassing basic-auth — e.g. `mcp` for MCP servers. |
+| `OAUTH_RESOURCE` | optional | Enables AppShield's OAuth 2.1 broker and gates exactly the path in the URL (e.g. `https://myapp-${APP_DOMAIN}/mcp`) on Bearer tokens. The machine/API path for MCP servers — see `Apps/Beacon`, `Apps/ChronosMCP`. Requires AppShield **>= 2.0.7**. |
+| `OAUTH_SCOPE` | optional | Scope the resource advertises/grants (default `access`; MCP apps use `mcp`). |
+| `OAUTH_DATA_DIR` | optional | Where registered clients, signing keys and grants live. Set to `/data/oauth` and bind-mount `/DATA/AppData/<app>/oauth` so they survive redeploys. |
+
+> **`AUTH_HASH` is dead under Maison — do not add it.** It was generated per app by the
+> CasaOS installer. Maison generates nothing: the variables an app receives are its
+> `BaseVars` (`AppID`, `PUID`, `PGID`, `TZ`, `DATA_ROOT`, `DATA_HOST_PATH`) plus the
+> deployment's `.env.app` (`APP_NET`, `APP_DOMAIN`, `APP_PUBLIC_IP*`, `APP_EMAIL`,
+> `APP_DEFAULT_PASSWORD`, …), and `AUTH_HASH` is in neither. Written into a compose
+> file it interpolates to an empty string; written into `index` or a tip it shows up as
+> a literal `${AUTH_HASH}`. It would be inert even if it were set — AppShield ignores it
+> unless `AUTH_HASH_MODE` is `"env"` or `"managed"`, and the default is `off`. So: no
+> `AUTH_HASH:` in `environment:`, and no `/?hash=…` in `x-casaos.index` or
+> `x-compose-app.webui-path`.
+
+> **`CREDENTIAL_VALIDATE_URL` is gone.** It used to point at `http://casaos-oidc-bridge:8090/validate` so machine clients could authenticate with CasaOS credentials. The bridge is being removed — do **not** add this variable to new apps. Machine/API access now goes through `OAUTH_RESOURCE`.
+
+> **Machine/API clients: use `OAUTH_RESOURCE`, not `ALLOWED_PATHS`.** `ALLOWED_PATHS`
+> exempts a path from the SSO gate; with `AUTH_HASH` inert, nothing takes its place and
+> the path ends up reachable with no credential at all. `OAUTH_RESOURCE` (AppShield
+> >= 2.0.7) gates exactly that path on Bearer tokens instead — see `Apps/Beacon` and
+> `Apps/BrowserMCP`. Some older store apps still ship the `ALLOWED_PATHS` pattern; they
+> are being migrated, do not copy them.
+
+**Checklist for OIDC apps:**
+- [ ] Caddy labels are attached **only to the AppShield sidecar**, never to the backend — otherwise the backend is exposed unauthenticated.
+- [ ] The sidecar carries the full env set: `BACKEND_HOST`, `BACKEND_PORT`, `LISTEN_PORT`, `OIDC_REGISTRAR_URL`, `REDIRECT_HOST_SUFFIXES`.
+- [ ] No `AUTH_HASH` anywhere: not in `environment:`, and no `/?hash=…` in `x-casaos.index`, `x-compose-app.webui-path`, or a tip. It resolves to nothing under Maison.
+- [ ] `x-casaos.main` points at the primary service.
+- [ ] Backend service has no public Caddy labels, and does **not** publish its **HTTP/UI** port to the host — the UI must be reachable only through the sidecar, over the shared network. Publishing a *non-HTTP* port the app genuinely needs (BitTorrent peer, game server, SMB, WireGuard, …) is fine and expected: that traffic cannot pass through an HTTP sidecar, and blocking it would just break the app. See [Publishing host ports](#publishing-host-ports).
+- [ ] The sidecar's `container_name` equals the top-level `name:` (lowercase alnum + `-`, not starting with a digit). `auth-registrar` derives the OIDC `client_id` from the container name via PTR lookup on the `pcs` network, so the `container_name` is load-bearing — it must be stable across reinstalls. The compose **service name itself may differ** (shipped apps use `myapp`, `myapp-proxy`, `nginxhashlock`, etc.).
+- [ ] The sidecar sets `hostname:` to the **same value** as its `container_name`. AppShield's auth-service builds its OIDC redirect URIs from `os.hostname()` (as `<app>-<suffix>`), and `auth-registrar` independently attests the app name via the container's PTR record and **rejects any redirect URI that doesn't match**. If `hostname:` is omitted, Docker defaults it to the random container ID, the submitted redirect URIs won't match the attested name, and OIDC registration fails at first login. (`container_name` alone does **not** set the in-container hostname.)
+- [ ] Do not claim `auth-${APP_DOMAIN}` in any Caddy label — it collides with the PCS's Authelia and causes intermittent `invalid_client` errors.
+- [ ] Pin AppShield to a specific version tag (currently `ghcr.io/yundera/appshield:2.0.9`; `OAUTH_RESOURCE` needs >= 2.0.7) — never `:latest` / `:main`.
+
+**Requirements on the host PCS:** the `authelia` and `auth-registrar` containers must be running on the `pcs` network (provisioned automatically by the current `template-root`). If they are missing, the app fails at first login with `ENOTFOUND auth-registrar` in the sidecar logs.
+
 #### System Variables
 
-CasaOS automatically provides several system variables for your compose files:
+Yundera injects the following variables into every app at container creation. Reference them in `environment:`, `volumes:`, `labels:`, and `pre-install-cmd`.
 
-**Available Variables:**
-- `$PCS_DEFAULT_PASSWORD`: A secure default password generated by CasaOS for applications requiring authentication
-- `$PCS_DOMAIN`: The domain (without https://) mapped to this container for web UI access
-- `$PCS_PUBLIC_IP`: The public IP address used for port binding announcements and external access
-- `$PCS_DATA_ROOT`: The data root directory (always `/DATA`)
-- `$PCS_EMAIL`: Admin email in the format `admin@DOMAIN`
-- `$AppID`: The application name/ID
-- `$PUID/$PGID`: User/Group IDs for proper file permissions
-- `$TZ`: System timezone
+These are written into the app's `.env` on install and refreshed on **every start**, so they track the deployment as it changes. Maison does not edit your compose file — a variable reaches your app only because your compose references it.
 
-**Example Usage:**
+For the two that describe *where the deployment puts things*, write the defaulted form (`${APP_NET:-pcs}`, `${DATA_ROOT:-/DATA}`): the reference is what makes the app portable, and the default is what keeps a hand-run `docker compose up -d` working before Maison has written an `.env`.
+
+**Available variables:**
+- `$APP_NET`: The shared external network apps are attached to (`pcs` on a PCS). Use it as `name: ${APP_NET:-pcs}` in your `networks:` block — see [Caddy Integration](#caddy-integration-web-ui-access).
+- `$DATA_ROOT`: The data folder as the **Docker host** sees it — normally `/DATA`, but not on every deployment. Use it as the prefix of every bind source: `${DATA_ROOT:-/DATA}/AppData/$AppID/…`.
+- `$APP_DOMAIN`: Domain root for this app (e.g. `user.nsl.sh`). Compose a full URL as `https://<prefix>-${APP_DOMAIN}`.
+- `$APP_PUBLIC_IP_DASH`: The server's public IPv4 with dots converted to dashes — used for `nip.io` / `sslip.io` Caddy labels.
+- `$APP_DEFAULT_PASSWORD`: A secure default password generated by Yundera. Use it for first-boot admin credentials instead of hard-coding.
+- `$APP_EMAIL`: Admin email in the format `admin@DOMAIN`.
+- `$AppID`: The application name (equal to the compose top-level `name:`). Use in volume paths: `/DATA/AppData/$AppID/…`.
+- `$PUID` / `$PGID`: User / group IDs for proper file permissions (typically `1000:1000`).
+- `$TZ`: System timezone.
+
+**Example usage:**
 ```yaml
 environment:
-  - PASSWORD=$PCS_DEFAULT_PASSWORD
-  - DOMAIN=$PCS_DOMAIN
-  - PUBLIC_IP=$PCS_PUBLIC_IP
-  - EMAIL=$PCS_EMAIL
-  - DATA_ROOT=$PCS_DATA_ROOT
+  - BASE_URL=https://myapp-${APP_DOMAIN}
+  - PUBLIC_URL=https://myapp-${APP_PUBLIC_IP_DASH}.sslip.io
+  - ADMIN_PASSWORD=$APP_DEFAULT_PASSWORD
+  - ADMIN_EMAIL=$APP_EMAIL
   - PUID=$PUID
   - PGID=$PGID
   - TZ=$TZ
+volumes:
+  - ${DATA_ROOT:-/DATA}/AppData/$AppID/data:/app/data
 ```
 
 #### Environment Variables
@@ -638,14 +1285,17 @@ CasaOS provides additional functionality for environment variable management:
 We occasionally select certain apps as featured apps to display at the AppStore front. Featured apps have higher standards than regular apps:
 
 - **Icon**: Transparent background PNG image, 192x192 pixels
-- **Thumbnail**: 784x442 pixels with rounded corner mask, preferably PNG with transparent background
+- **Thumbnail**: 784x442 pixels with rounded corner mask, preferably PNG with transparent background.
+  Optional for regular apps, where the store falls back to `screenshot-1.png`. Supply one only as a
+  purpose-made tile: a rescaled icon, or a copy of a screenshot, carries no more information than the
+  fallback and should be omitted instead
 - **Screenshots**: 1280x720 pixels, PNG or JPG format, keep file size as small as possible
 
 Please use the prepared [PSD template files](psd-source) to quickly create these images.
 
-**Language Requirement:**  
-All apps submitted for validation must include *descriptions* and *tagline* in at least the following languages: **English, French, Korean, Chinese, and Spanish**.
-For the title, only English is required.
+**Language Requirement:**
+- **Mandatory:** English (`en_us`) — required for *title*, *tagline*, and *description*.
+- **Recommended:** French (`fr_fr`), Korean (`ko_kr`), Chinese (`zh_cn`), and Spanish (`es_es`) — provide *tagline* and *description* in these whenever possible. These are the five languages the store fully supports and translations help reach the full user base.
 
 ## Feedback
 

@@ -1,0 +1,233 @@
+name: docusaurusmcp
+
+services:
+  # MCP server — exposes Docusaurus docs via MCP tools (list, read, write, search, rebuild)
+  docusaurusmcp-backend:
+    image: ghcr.io/yundera/docusaurus-mcp:1.0.2
+    container_name: docusaurusmcp-backend
+    hostname: docusaurusmcp-backend
+    user: "0:0"
+    restart: unless-stopped
+    cpu_shares: 50
+    expose:
+      - 9750
+    environment:
+      - PUID=$PUID
+      - PGID=$PGID
+      - TZ=$TZ
+      - PORT=9750
+      - DOCS_ROOT=/app/docusaurus-src/docs
+      - SRC_DIR=/app/docusaurus-src
+      - BUILD_DIR=/app/docusaurus-build
+    volumes:
+      # Mount the Docusaurus project source (from the companion Docusaurus app)
+      - type: bind
+        source: ${DATA_ROOT:-/DATA}/AppData/docusaurus/src/
+        target: /app/docusaurus-src
+      # Mount the build output directory (shared with the Docusaurus nginx backend)
+      - type: bind
+        source: ${DATA_ROOT:-/DATA}/AppData/docusaurus/build/
+        target: /app/docusaurus-build
+    networks:
+      - pcs
+
+  # Beaconify sidecar — makes this MCP discoverable by the Beacon aggregator.
+  # Proxies the upstream MCP and replies to Beacon's UDP discovery on port 9099.
+  docusaurusmcp-beacon:
+    image: ghcr.io/worph/beaconify@sha256:63ce59fbe15365540cb3d45849a46b68b8132a2c1d605ea8b7b310d010540107
+    container_name: docusaurusmcp-beacon
+    hostname: docusaurusmcp-beacon
+    restart: unless-stopped
+    cpu_shares: 20
+    expose:
+      - 9099
+    environment:
+      BEACONIFY_NAME: docusaurus-mcp
+      BEACONIFY_DESCRIPTION: "Docusaurus MCP — list, read, write, search docs and rebuild the site"
+      BEACONIFY_UPSTREAM_URL: http://docusaurusmcp-backend:9750/mcp
+    depends_on:
+      - docusaurusmcp-backend
+    networks:
+      - pcs
+
+  # AppShield gates the admin panel with SSO and /mcp with OAuth 2.1.
+  docusaurusmcp-proxy:
+    image: ghcr.io/yundera/appshield:3.0.2
+    container_name: docusaurusmcp
+    hostname: docusaurusmcp
+    restart: unless-stopped
+    cpu_shares: 80
+    expose:
+      - 80
+    user: "0:0"   # numeric: scratch image has no passwd; /data/oauth is chowned $PUID
+    environment:
+      BACKEND_HOST: docusaurusmcp-backend
+      BACKEND_PORT: "9750"
+      LISTEN_PORT: "80"
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
+      # OAuth 2.1 broker: AppShield runs an OAuth/OIDC authorization server
+      # fronting Dex and gates the path named by the resource URL (/mcp) on
+      # Bearer tokens. This is the machine/API path: clients like claude.ai
+      # self-register via DCR, others get a manual client
+      # from the admin page at https://docusaurusmcp-${APP_DOMAIN}/AppShield/oauth.
+      OAUTH_RESOURCE: "https://docusaurusmcp-${APP_DOMAIN}/mcp"
+      OAUTH_SCOPE: "mcp"
+      OAUTH_DATA_DIR: "/data/oauth"
+    volumes:
+      # Persist DCR/manual clients, signing keys and grants across redeploys.
+      - ${DATA_ROOT:-/DATA}/AppData/docusaurusmcp/oauth/:/data/oauth
+    depends_on:
+      - docusaurusmcp-backend
+    networks:
+      - pcs
+    labels:
+      caddy_0: docusaurusmcp-${APP_DOMAIN}
+      caddy_0.import: gateway_tls
+      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_1: docusaurusmcp-${APP_PUBLIC_IP_DASH}.nip.io
+      caddy_1.import: gateway_tls
+      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_2: docusaurusmcp-${APP_PUBLIC_IP_DASH}.sslip.io
+      caddy_2.reverse_proxy: "{{upstreams 80}}"
+
+networks:
+  pcs:
+    name: ${APP_NET:-pcs}
+    external: true
+
+x-casaos:
+  architectures:
+    - amd64
+    - arm64
+  main: docusaurusmcp-proxy
+  store_app_id: docusaurusmcp
+  hostname: docusaurusmcp-${APP_DOMAIN}
+  scheme: https
+  port_map: "443"
+  index: /
+  category: Developer
+  tags: ["developer", "ai"]
+  icon: icon.png
+  thumbnail: thumbnail.png
+  screenshot_link:
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
+  chips:
+    - key: mcp
+      name:
+        en_us: MCP
+  title:
+    en_us: Docusaurus MCP
+  tagline:
+    en_us: MCP server for Docusaurus — read, write, search docs and rebuild
+    fr_fr: Serveur MCP pour Docusaurus — lire, ecrire, rechercher des docs et reconstruire
+  description:
+    en_us: |
+      **Docusaurus documentation control for AI assistants via MCP**
+
+      Docusaurus MCP exposes your self-hosted Docusaurus project as an MCP (Model Context Protocol) server, letting LLMs and AI assistants list documents, read pages, create and update content, search across all docs, and trigger site rebuilds — all against your Docusaurus instance running on this server.
+
+      **Think of it like:** A programmable remote control for your Docusaurus docs site, driven by natural language.
+
+      **Perfect if you:** Have a self-hosted Docusaurus and want AI assistants to read, write, search, and rebuild your documentation without manual file editing.
+    fr_fr: |
+      **Controle de documentation Docusaurus pour les assistants IA via MCP**
+
+      Docusaurus MCP expose votre projet Docusaurus auto-heberge en tant que serveur MCP (Model Context Protocol), permettant aux LLMs et assistants IA de lister les documents, lire les pages, creer et mettre a jour le contenu, rechercher dans tous les docs, et declencher des reconstructions du site.
+
+      **Parfait si vous:** Avez un Docusaurus auto-heberge et voulez que des assistants IA lisent, ecrivent, recherchent et reconstruisent votre documentation.
+  tips:
+    before_install:
+      en_us: |
+        **Prerequisites:**
+        1. A running **Docusaurus** instance installed from this App Store
+        2. The Docusaurus app must be installed first — this MCP reads and writes files in its data directory
+
+        **MCP Integration (for AI/LLMs):**
+
+        **Option 1: Public URL (OAuth)**
+
+        The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
+        URL below — clients that support OAuth discovery (claude.ai, Claude
+        Desktop) register themselves and open a browser for you to approve with
+        your server account (single sign-on).
+        ```json
+        {
+          "mcpServers": {
+            "docusaurus-mcp": {
+              "type": "http",
+              "url": "https://docusaurusmcp-${APP_DOMAIN}/mcp"
+            }
+          }
+        }
+        ```
+        For clients that need a pre-created client_id/client_secret (n8n, custom
+        scripts), open **https://docusaurusmcp-${APP_DOMAIN}/AppShield/oauth** and
+        create one there.
+
+        **Option 2: Local Docker connection (no auth required)**
+
+        For AI assistants running on the same server, connect directly via the Docker network:
+        ```json
+        {
+          "mcpServers": {
+            "docusaurus-mcp": {
+              "type": "http",
+              "url": "http://docusaurusmcp-backend:9750/mcp"
+            }
+          }
+        }
+        ```
+        *Note: Requires the AI assistant to be on the `pcs` Docker network.*
+
+        **Option 3: Via Beacon (aggregated)**
+
+        If you have **Beacon** installed, Docusaurus MCP auto-registers there via the bundled `beaconify` sidecar and its tools show up under the `docusaurus-mcp__*` namespace — no extra config.
+
+        **Available MCP Tools:**
+        | Tool | Description |
+        |------|-------------|
+        | `list_docs` | List all Markdown/MDX files in the docs directory |
+        | `read_doc` | Read the full content of a document |
+        | `write_doc` | Create or update a Markdown/MDX document |
+        | `search_docs` | Full-text search across all documents |
+        | `rebuild` | Run the Docusaurus build and update the live site |
+        | `list_files` | List files in the project root or subdirectory (CSS, config, etc.) |
+        | `read_file` | Read any project file (CSS, JS, JSON, etc.) |
+        | `write_file` | Create or overwrite any project file |
+      fr_fr: |
+        **Prerequis:**
+        1. Une instance **Docusaurus** en cours d'execution, installee depuis ce App Store
+        2. L'app Docusaurus doit etre installee en premier — ce MCP lit et ecrit des fichiers dans son repertoire de donnees
+
+        **Outils MCP disponibles:**
+        | Outil | Description |
+        |-------|-------------|
+        | `list_docs` | Lister tous les fichiers Markdown/MDX |
+        | `read_doc` | Lire le contenu complet d'un document |
+        | `write_doc` | Creer ou mettre a jour un document |
+        | `search_docs` | Recherche plein texte dans tous les documents |
+        | `rebuild` | Lancer le build Docusaurus et mettre a jour le site |
+        | `list_files` | Lister les fichiers du projet (CSS, config, etc.) |
+        | `read_file` | Lire un fichier du projet (CSS, JS, JSON, etc.) |
+        | `write_file` | Creer ou remplacer un fichier du projet |
+
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/docusaurus/src
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/docusaurus/build
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/docusaurusmcp/oauth
+      user: $PUID
+      group: $PGID
+  webui-host: docusaurusmcp-${domain}
+  webui-path: "/"

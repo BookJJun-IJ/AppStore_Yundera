@@ -1,12 +1,17 @@
 name: chronosmcp
 services:
-  # Main server — reachable at chronosmcp:9054 on the pcs network
-  chronosmcp:
+  # Main server — reachable at chronosmcp-backend:9054 on this app's private
+  # network only. It ships no authentication of its own, so it must never join
+  # the shared `pcs` network: any co-tenant container there could read and
+  # rewrite the cron rules and trigger arbitrary MCP tool calls unauthenticated.
+  # The perimeter is chronosmcp-proxy (AppShield) and nothing else.
+  chronosmcp-backend:
     image: ghcr.io/worph/chronos-mcp:1.0.7
-    container_name: chronosmcp
-    hostname: chronosmcp
+    container_name: chronosmcp-backend
+    hostname: chronosmcp-backend
     user: $PUID:$PGID
     restart: unless-stopped
+    cpu_shares: 70
     expose:
       - 9054
     environment:
@@ -16,29 +21,53 @@ services:
       - CONFIG_PATH=/app/data/config.json
     volumes:
       - type: bind
-        source: /DATA/AppData/chronosmcp/
+        source: ${DATA_ROOT:-/DATA}/AppData/chronosmcp/
         target: /app/data
     networks:
-      - pcs
+      # App-private only — the link that carries proxy -> backend traffic.
+      # Deliberately not on `pcs`; see the note above and tips Option 2.
+      - chronosmcp-internal
 
-  # Nginx-hash-lock provides perimeter authentication for the web UI
+  # AppShield provides perimeter authentication for the web UI (SSO) and
+  # for the /mcp endpoint (OAuth 2.1 broker — see OAUTH_RESOURCE below).
   chronosmcp-proxy:
-    image: ghcr.io/yundera/nginx-hash-lock:1.0.5
+    # 2.0.7+ is required: first image with the generic OAUTH_RESOURCE /
+    # OAUTH_SCOPE names and a configurable protected path.
+    image: ghcr.io/yundera/appshield:3.0.2
+    container_name: chronosmcp
+    # OIDC identity: the AppShield auth-service builds its OIDC redirect URIs from
+    # os.hostname(), and the auth-registrar independently attests this app's name via the
+    # container's PTR record, rejecting any redirect URI that doesn't match. Must equal the
+    # app name, or Docker defaults the hostname to the random container ID and OIDC registration fails.
+    hostname: chronosmcp
     restart: unless-stopped
     cpu_shares: 50
     expose:
       - 80
-    user: "root"
+    user: "0:0"   # numeric: scratch image has no passwd; /data/oauth is chowned $PUID
     environment:
-      AUTH_HASH: $AUTH_HASH
-      BACKEND_HOST: chronosmcp
+      BACKEND_HOST: chronosmcp-backend
       BACKEND_PORT: "9054"
       LISTEN_PORT: "80"
-      USER: "ADMIN"
-      PASSWORD: $APP_DEFAULT_PASSWORD
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
+      # OAuth 2.1 broker: AppShield runs an OAuth/OIDC authorization server
+      # fronting Dex and gates the path named by the resource URL (/mcp) on
+      # Bearer tokens. This is the machine/API path: clients like claude.ai
+      # self-register via DCR, others get a manual client
+      # from the admin page at https://chronosmcp-${APP_DOMAIN}/AppShield/oauth.
+      OAUTH_RESOURCE: "https://chronosmcp-${APP_DOMAIN}/mcp"
+      OAUTH_SCOPE: "mcp"
+      OAUTH_DATA_DIR: "/data/oauth"
+    volumes:
+      # Persist DCR/manual clients, signing keys and grants across redeploys.
+      - ${DATA_ROOT:-/DATA}/AppData/chronosmcp/oauth:/data/oauth
     depends_on:
-      - chronosmcp
+      - chronosmcp-backend
     networks:
+      # Shared with the backend and never rewritten by the launcher — this is the
+      # link the sidecar proxies over. See the note on the backend's networks.
+      - chronosmcp-internal
       - pcs
     labels:
       caddy_0: chronosmcp-${APP_DOMAIN}
@@ -51,18 +80,28 @@ services:
       caddy_2.reverse_proxy: "{{upstreams 80}}"
 
 networks:
+  # App-private link between the sidecar and the backend.
+  chronosmcp-internal:
+    driver: bridge
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
 
 x-casaos:
   architectures:
+    # amd64 only: the backend image ghcr.io/worph/chronos-mcp:1.0.7 publishes an
+    # amd64 manifest only (the AppShield sidecar does ship arm64, but the app
+    # cannot run without its backend). Re-add arm64 when the backend does.
     - amd64
-    - arm64
-  main: chronosmcp
-  index: /?hash=$AUTH_HASH
-  author: Yundera
+  # The AppShield sidecar, i.e. the service every caddy_N label points at. It has
+  # to be this one and not the backend: the launcher attaches the deployment's app
+  # network to the main service only, so naming the backend leaves the sidecar
+  # off the network Caddy routes over (503). It also makes the tile's health
+  # reflect the service the user actually reaches.
+  main: chronosmcp-proxy
+  index: /
   category: Utilities
+  tags: ["developer", "ai"]
   description:
     en_us: |
       **Schedule MCP tool calls with cron expressions**
@@ -89,15 +128,15 @@ x-casaos:
       - 从 Web 仪表板监控执行历史和结果
       - 通过 Web UI 或内置 MCP 服务器直接从 AI 助手管理规则
   developer: Worph
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ChronosMCP/icon.png
+  icon: icon.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ChronosMCP/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ChronosMCP/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ChronosMCP/screenshot-3.png
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
   tagline:
     en_us: Cron-based scheduler for MCP tool calls
     zh_cn: 基于 cron 的 MCP 工具调用调度器
-  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ChronosMCP/thumbnail.png
+  thumbnail: thumbnail.png
   title:
     en_us: Chronos MCP
   chips:
@@ -129,32 +168,44 @@ x-casaos:
 
         Chronos itself exposes an MCP server, allowing AI assistants to create, update, and manage cron rules.
 
-        **Option 1: Public URL (with hash auth)**
+        **Option 1: Public URL (OAuth)**
+
+        The `/mcp` endpoint is protected by OAuth 2.1. Point your client at the
+        URL below — clients that support OAuth discovery (claude.ai, Claude
+        Desktop) register themselves and open a browser for you to approve with
+        your server account (single sign-on).
         ```json
         {
           "mcpServers": {
             "chronos-mcp": {
               "type": "http",
-              "url": "https://chronosmcp-${APP_DOMAIN}/mcp?hash=${AUTH_HASH}"
+              "url": "https://chronosmcp-${APP_DOMAIN}/mcp"
             }
           }
         }
         ```
+        For clients that need a pre-created client_id/client_secret (n8n, custom
+        scripts), open **https://chronosmcp-${APP_DOMAIN}/AppShield/oauth** and
+        create one there.
 
-        **Option 2: Local Docker connection (no auth required)**
+        **Option 2: Local Docker connection (no auth required) — on your server, use Option 1 instead**
 
-        For AI assistants running on the same server, connect directly via the Docker network:
+        On a plain Docker host you could reach the backend directly over the
+        shared network:
         ```json
         {
           "mcpServers": {
             "chronos-mcp": {
               "type": "http",
-              "url": "http://chronosmcp:9054/mcp"
+              "url": "http://chronosmcp-backend:9054/mcp"
             }
           }
         }
         ```
-        *Note: Requires the AI assistant to be on the `pcs` Docker network.*
+        *Use Option 1 here.* On your server the launcher attaches the backend to
+        this app's private network only, so `chronosmcp-backend` cannot be
+        resolved from the shared `pcs` network — a client on `pcs` will not reach
+        it. Use **Option 1** above, which is OAuth-gated and works from anywhere.
 
         **Available MCP Tools:**
         | Tool | Description |
@@ -191,32 +242,39 @@ x-casaos:
 
         Chronos 本身暴露一个 MCP 服务器，允许 AI 助手创建、更新和管理 cron 规则。
 
-        **选项 1：公共 URL（使用 hash 认证）**
+        **选项 1：公共 URL（OAuth）**
+
+        `/mcp` 端点受 OAuth 2.1 保护。将客户端指向以下 URL — 支持 OAuth 发现的客户端
+        （claude.ai、Claude Desktop）会自动注册并打开浏览器，让您使用服务器账号（单点登录）授权。
         ```json
         {
           "mcpServers": {
             "chronos-mcp": {
               "type": "http",
-              "url": "https://chronosmcp-${APP_DOMAIN}/mcp?hash=${AUTH_HASH}"
+              "url": "https://chronosmcp-${APP_DOMAIN}/mcp"
             }
           }
         }
         ```
+        对于需要预先创建 client_id/client_secret 的客户端（n8n、自定义脚本），请打开
+        **https://chronosmcp-${APP_DOMAIN}/AppShield/oauth** 创建。
 
-        **选项 2：本地 Docker 连接（无需认证）**
+        **选项 2：本地 Docker 连接（无需认证）— 在您的服务器上请改用选项 1**
 
-        对于在同一服务器上运行的 AI 助手，通过 Docker 网络直接连接：
+        在普通 Docker 主机上，可以通过共享网络直接连接后端：
         ```json
         {
           "mcpServers": {
             "chronos-mcp": {
               "type": "http",
-              "url": "http://chronosmcp:9054/mcp"
+              "url": "http://chronosmcp-backend:9054/mcp"
             }
           }
         }
         ```
-        *注意：需要 AI 助手在 `pcs` Docker 网络上。*
+        *在您的服务器上请使用选项 1*：启动器只把后端接入本应用的专用网络，
+        因此共享 `pcs` 网络上的客户端无法解析 `chronosmcp-backend`。请使用上面的
+        **选项 1**（OAuth 保护，任何位置均可访问）。
 
         **可用 MCP 工具：**
         | 工具 | 描述 |
@@ -230,3 +288,15 @@ x-casaos:
         | `get_logs` | 查看执行日志 |
         | `clear_logs` | 清除规则的日志 |
         | `get_status` | 获取调度器状态 |
+
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/chronosmcp
+      user: $PUID
+      group: $PGID
+  webui-host: chronosmcp-${domain}
+  webui-path: "/"

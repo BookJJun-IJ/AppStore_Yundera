@@ -1,0 +1,49 @@
+# PowerSync service configuration -- the offline sync the wger phone app uses.
+#
+# Adapted from wger-project/docker services/config-powersync/powersync.yaml
+# (master, fetched 2026-09-08) with its tutorial comments removed. Every value
+# comes from the container's environment through the `!env` tag, which only
+# substitutes variables whose name starts with `PS_`.
+
+telemetry:
+  # Nothing about a personal server's usage is sent to PowerSync.
+  disable_telemetry_sharing: true
+  prometheus_port: 9090
+
+# The wger database, read through the `powersync` publication that wger's own
+# core migration 0027 creates. Needs `wal_level=logical` on that server, which
+# the compose file sets.
+replication:
+  connections:
+    - type: postgresql
+      uri: !env PS_DATABASE_URI
+      # The database is on the app-private bridge and never leaves the host,
+      # so there is no certificate for this to verify.
+      sslmode: disable
+
+# Sync buckets live in a schema of that same database under a role of their
+# own, created by the setup-powersync-storage init step.
+storage:
+  type: postgresql
+  uri: !env PS_STORAGE_PG_URI
+  sslmode: disable
+
+port: !env PS_PORT
+
+# Upstream's workaround for powersync-service#682: the parameter-result limit
+# counts source rows rather than the distinct results of the CTE, so a user
+# with a long nutrition log trips it well below the real 1000-bucket ceiling.
+api:
+  parameters:
+    max_parameter_query_results: 10000
+
+sync_rules:
+  path: sync_rules.yaml
+
+client_auth:
+  allow_local_jwks: true
+  # wger serves the public half of the RSA keypair the pre_install hook
+  # generated; the app's token comes from /api/v2/powersync-token and is
+  # verified against it here.
+  jwks_uri: !env PS_JWKS_URL
+  audience: ["powersync"]

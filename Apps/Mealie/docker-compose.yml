@@ -1,0 +1,375 @@
+name: mealie
+
+
+services:
+  mealie:
+    image: ghcr.io/mealie-recipes/mealie:v3.14.0
+    container_name: mealie
+    restart: unless-stopped
+    user: "0:0"
+    expose:
+      - 80                    # Default port for Mealie v3
+    labels:
+      caddy_0: mealie-${APP_DOMAIN}
+      caddy_0.import: gateway_tls
+      caddy_0.reverse_proxy: "{{upstreams 80}}"
+      caddy_1: mealie-${APP_PUBLIC_IP_DASH}.nip.io
+      caddy_1.import: gateway_tls
+      caddy_1.reverse_proxy: "{{upstreams 80}}"
+      caddy_2: mealie-${APP_PUBLIC_IP_DASH}.sslip.io
+      caddy_2.reverse_proxy: "{{upstreams 80}}"
+    environment:
+      PUID: $PUID              # Process user ID
+      PGID: $PGID              # Process group ID
+      TZ: $TZ                  # Timezone setting
+      LOG_LEVEL: warning
+      API_PORT: 80
+      BASE_URL: https://mealie-${APP_DOMAIN}  # Set base URL for proper routing
+    networks:
+      - pcs
+    healthcheck:
+      disable: true
+    cpu_shares: 70
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 512M
+    volumes:
+      - ${DATA_ROOT:-/DATA}/AppData/$AppID/data/:/app/data
+
+networks:
+  pcs:
+    name: ${APP_NET:-pcs}
+    external: true
+
+x-casaos:
+  main: mealie
+  store_app_id: mealie
+  webui_port: 80
+  index: /
+  icon: icon.png
+  screenshot_link:
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
+  thumbnail: thumbnail.png
+  architectures:
+    - amd64
+    - arm64
+  category: Utilities
+  tags: ["personal", "family"]
+  description:
+    en_us: |
+      **Your family cookbook that never loses recipes**
+      
+      Tired of losing great recipes when websites disappear? Mealie solves this by saving any recipe from any website directly to your personal collection. Just paste a recipe link and it automatically saves everything - ingredients, instructions, and photos.
+      
+      **What you can do:**
+      • Save recipes from any cooking website with one click
+      • Plan your weekly meals and automatically create shopping lists
+      • Share recipes with family members
+      • Access your recipes from phone, tablet, or computer
+      
+      **Think of it like:** A smart recipe box that automatically clips recipes from magazines and websites, then helps you plan meals and make shopping lists.
+      
+      **Perfect if you:** Cook at home, want to try new recipes, or are tired of losing great recipes when websites change or disappear.
+    ko_kr: |
+      **절대 잃어버리지 않는 가족 요리책**
+      
+      웹사이트가 사라져서 좋은 레시피를 잃어버린 적이 있나요? 미일리는 어떤 웹사이트의 레시피든 개인 컬렉션에 직접 저장해서 이 문제를 해결합니다. 레시피 링크를 붙여넣기만 하면 재료, 조리법, 사진까지 모든 것을 자동으로 저장합니다.
+      
+      **할 수 있는 것:**
+      • 모든 요리 웹사이트에서 원클릭으로 레시피 저장
+      • 주간 식사를 계획하고 쇼핑 리스트 자동 생성
+      • 가족들과 레시피 공유
+      • 휴대폰, 태블릿, 컴퓨터에서 레시피 확인
+      
+      **이렇게 생각해보세요:** 잡지와 웹사이트에서 레시피를 자동으로 스크랩한 다음, 식사 계획과 쇼핑 리스트 작성을 도와주는 스마트 레시피 보관함.
+      
+      **이런 분께 완벽해요:** 집에서 요리하고, 새로운 레시피를 시도하고 싶거나, 웹사이트가 변경되거나 사라져서 좋은 레시피를 잃어버린 경험이 있는 분들.
+    zh_cn: |
+      **永不丢失食谱的家庭食谱书**
+      
+      厌倦了因网站消失而丢失好食谱吗？Mealie通过将任何网站的食谱直接保存到您的个人收藏来解决这个问题。只需粘贴食谱链接，它就会自动保存所有内容 - 配料、说明和照片。
+      
+      **您可以做的事:**
+      • 一键保存任何烹饪网站的食谱
+      • 规划每周餐食并自动创建购物清单
+      • 与家庭成员分享食谱
+      • 从手机、平板或电脑访问您的食谱
+      
+      **可以这样想:** 一个智能食谱盒，自动从杂志和网站剪辑食谱，然后帮助您规划餐食和制作购物清单。
+      
+      **非常适合:** 在家烹饪、想尝试新食谱，或因网站更改或消失而失去好食谱感到沮丧的人。
+    fr_fr: |
+      **Votre livre de cuisine familial qui ne perd jamais de recettes**
+      
+      Fatigué de perdre d'excellentes recettes quand les sites web disparaissent ? Mealie résout ce problème en sauvegardant n'importe quelle recette de n'importe quel site web directement dans votre collection personnelle. Collez simplement un lien de recette et tout se sauvegarde automatiquement - ingrédients, instructions et photos.
+      
+      **Ce que vous pouvez faire :**
+      • Sauvegarder des recettes de n'importe quel site de cuisine en un clic
+      • Planifier vos repas hebdomadaires et créer automatiquement des listes de courses
+      • Partager des recettes avec les membres de la famille
+      • Accéder à vos recettes depuis téléphone, tablette ou ordinateur
+      
+      **Pensez-y comme :** Une boîte à recettes intelligente qui découpe automatiquement les recettes des magazines et sites web, puis vous aide à planifier les repas et faire les listes de courses.
+      
+      **Parfait si vous :** Cuisinez à la maison, voulez essayer de nouvelles recettes, ou êtes fatigué de perdre d'excellentes recettes quand les sites changent ou disparaissent.
+    es_es: |
+      **Tu libro de cocina familiar que nunca pierde recetas**
+      
+      ¿Cansado de perder excelentes recetas cuando los sitios web desaparecen? Mealie soluciona esto guardando cualquier receta de cualquier sitio web directamente en tu colección personal. Solo pega un enlace de receta y automáticamente guarda todo - ingredientes, instrucciones y fotos.
+      
+      **Lo que puedes hacer:**
+      • Guardar recetas de cualquier sitio de cocina con un clic
+      • Planificar tus comidas semanales y crear automáticamente listas de compras
+      • Compartir recetas con miembros de la familia
+      • Acceder a tus recetas desde teléfono, tablet o computadora
+      
+      **Piénsalo como:** Una caja de recetas inteligente que automáticamente recorta recetas de revistas y sitios web, luego te ayuda a planificar comidas y hacer listas de compras.
+      
+      **Perfecto si:** Cocinas en casa, quieres probar nuevas recetas, o estás cansado de perder excelentes recetas cuando los sitios cambian o desaparecen.
+  developer: Mealie Recipes Team
+  tagline:
+    en_us: Your family recipes, organized and accessible forever
+    fr_fr: Vos recettes familiales, organisées et accessibles pour toujours
+    ko_kr: 가족 레시피를 영원히 체계적으로 관리
+    zh_cn: 您的家庭食谱，永久整理和访问
+    es_es: Tus recetas familiares, organizadas y accesibles para siempre
+  title:
+    en_us: Mealie
+  tips:
+    before_install:
+      en_us: |
+        **Getting Started**
+        | Username | Password |
+        | -------- | -------- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+        
+        **⚠️ Change these after your first login!**
+        
+        **How to use:**
+        1. Visit the website and login with the details above
+        2. Go to Profile Settings → Change your email & password
+        3. Click the "+" button, then paste any recipe URL
+        4. Watch as it automatically saves the recipe with photos
+        5. Use the meal planner to organize your week
+        6. Generate shopping lists from your planned meals
+        
+        **Recipe sources that work:**
+        AllRecipes, Food Network, BBC Good Food, and thousands of cooking blogs and websites.
+        
+        **Tip:** Try copying recipe URLs from your favorite cooking YouTube videos' descriptions!
+      ko_kr: |
+        **시작하기**
+        | 사용자명 | 비밀번호 |
+        | -------- | -------- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+        
+        **⚠️ 첫 로그인 후에 이것들을 변경하세요!**
+        
+        **사용 방법:**
+        1. 웹사이트를 방문하고 위의 정보로 로그인
+        2. 프로필 설정 → 이메일과 비밀번호 변경
+        3. "+" 버튼을 클릭한 후 레시피 URL 붙여넣기
+        4. 사진과 함께 자동으로 레시피가 저장되는 것을 확인
+        5. 식사 플래너를 사용하여 일주일 계획
+        6. 계획된 식사에서 쇼핑 리스트 생성
+        
+        **작동하는 레시피 소스:**
+        만개의레시피, 쿠킹클래스, 네이버 블로그, 그리고 수천 개의 요리 블로그와 웹사이트.
+        
+        **팁:** 좋아하는 요리 유튜브 영상 설명란에서 레시피 URL을 복사해보세요!
+      zh_cn: |
+        **开始使用**
+        | 用户名   | 密码 |
+        | -------- | ---- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+        
+        **⚠️ 首次登录后请更改这些！**
+        
+        **使用方法:**
+        1. 访问网站并使用上述信息登录
+        2. 个人资料设置 → 更改您的邮箱和密码
+        3. 点击"+"按钮，然后粘贴任何食谱URL
+        4. 观看它自动保存带有照片的食谱
+        5. 使用餐食规划器来组织您的一周
+        6. 从计划的餐食生成购物清单
+        
+        **有效的食谱来源:**
+        AllRecipes、美食网、BBC美食，以及数千个烹饪博客和网站。
+        
+        **提示:** 尝试从您喜欢的烹饪YouTube视频描述中复制食谱URL！
+      fr_fr: |
+        **Commencer**
+        | Nom d'utilisateur | Mot de passe |
+        | ----------------- | ------------ |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+        
+        **⚠️ Changez ceci après votre première connexion !**
+        
+        **Comment utiliser:**
+        1. Visitez le site web et connectez-vous avec les détails ci-dessus
+        2. Paramètres du profil → Changez votre email et mot de passe
+        3. Cliquez sur le bouton "+", puis collez n'importe quelle URL de recette
+        4. Regardez comme elle sauvegarde automatiquement la recette avec photos
+        5. Utilisez le planificateur de repas pour organiser votre semaine
+        6. Générez des listes de courses depuis vos repas planifiés
+        
+        **Sources de recettes qui fonctionnent:**
+        AllRecipes, Food Network, BBC Good Food, et des milliers de blogs culinaires et sites web.
+        
+        **Astuce:** Essayez de copier les URLs de recettes des descriptions de vos vidéos YouTube culinaires préférées !
+      es_es: |
+        **Comenzar**
+        | Usuario  | Contraseña |
+        | -------- | ---------- |
+        | `admin` | `$APP_DEFAULT_PASSWORD` |
+        
+        **⚠️ ¡Cambia estos después de tu primer inicio de sesión!**
+        
+        **Cómo usar:**
+        1. Visita el sitio web e inicia sesión con los detalles de arriba
+        2. Configuración de Perfil → Cambia tu email y contraseña
+        3. Haz clic en el botón "+", luego pega cualquier URL de receta
+        4. Observa cómo automáticamente guarda la receta con fotos
+        5. Usa el planificador de comidas para organizar tu semana
+        6. Genera listas de compras desde tus comidas planificadas
+        
+        **Fuentes de recetas que funcionan:**
+        AllRecipes, Food Network, BBC Good Food, y miles de blogs de cocina y sitios web.
+        
+        **Consejo:** ¡Intenta copiar URLs de recetas de las descripciones de tus videos de cocina favoritos de YouTube!
+
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/$AppID/data
+      user: $PUID
+      group: $PGID
+  # Mealie seeds its first admin from `_DEFAULT_EMAIL` / `_DEFAULT_PASSWORD`, which
+  # are pydantic *private* attributes (mealie/core/settings/settings.py, unchanged
+  # since v2.8.0) and therefore cannot be set from the environment at all: the
+  # `DEFAULT_EMAIL` / `DEFAULT_PASSWORD` env pair this app used to carry was inert,
+  # and every install came up on the published upstream default instead. There is
+  # no env var left that seeds the credential, so the rotation goes through the
+  # API once the app is answering -- post_up, on the app's own network.
+  #
+  # It presents $APP_DEFAULT_PASSWORD first and the upstream default only if that
+  # fails, so a re-run over an already-rotated install never submits a wrong
+  # password: Mealie locks an account out after SECURITY_MAX_LOGIN_ATTEMPTS=5
+  # failures. A run that cannot reach the API exits non-zero, which leaves the
+  # `once` marker unwritten so the next up retries; a failing post_up step is
+  # logged and swallowed, so it cannot take a healthy stack back down.
+  #
+  # Rotating the password is not enough: Mealie's /login page decides whether to
+  # show the "first time logging in" banner (and pre-fill changeme@example.com /
+  # MyPassword) purely from GET /api/app/about/startup-info's isFirstLogin, which
+  # is true as long as ANY user still has email == changeme@example.com
+  # (mealie/routes/app/app_about.py) -- the password is irrelevant to it. So this
+  # step also PUTs the admin's email to $APP_EMAIL (the store's usual
+  # admin@$APP_DOMAIN, same shape as Apps/Outline and Apps/Hubs) once it can log
+  # in, which is what the banner's own closing line ("change your email") asks
+  # for. The login identifier stays the username "admin" either way -- Mealie's
+  # seeded default user has username=admin, email=changeme@example.com
+  # (mealie/repos/seed/init_users.py) -- so Tips, which already documents
+  # `admin` / `$APP_DEFAULT_PASSWORD` rather than an email, needs no change.
+  init:
+    - name: seed-admin-password
+      image: curlimages/curl:8.14.1
+      phase: post_up
+      network: ${APP_NET:-pcs}
+      when: once
+      environment:
+        MEALIE_API: http://mealie:80
+        MEALIE_ADMIN: admin
+        MEALIE_ADMIN_EMAIL: ${APP_EMAIL}
+        MEALIE_NEW_PASSWORD: ${APP_DEFAULT_PASSWORD}
+        MEALIE_SEED_PASSWORD: MyPassword
+      entrypoint:
+        - /bin/sh
+      command:
+        - -c
+        # `$$` is an escaped dollar: Maison expands $NAME/${NAME} in this string
+        # before the container runs, so the shell's own variables are written $$NAME.
+        - |
+          set -u
+
+          # The first start runs alembic and seeds the default user, which takes
+          # appreciably longer than the container takes to appear.
+          n=0
+          until curl -fs -m 5 -o /dev/null "$$MEALIE_API/api/app/about"; do
+            n=$$((n + 1))
+            if [ "$$n" -ge 150 ]; then
+              echo "mealie: the API did not answer within 5 minutes" >&2
+              exit 1
+            fi
+            sleep 2
+          done
+
+          login() {
+            curl -fsS -m 15 -X POST "$$MEALIE_API/api/auth/token" \
+              --data-urlencode "username=$$MEALIE_ADMIN" \
+              --data-urlencode "password=$$1" |
+              sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p'
+          }
+
+          # Read-modify-write the whole self object rather than hand-building a
+          # UserBase body: PUT /api/users/{id} replaces every field it is sent
+          # (mealie/routes/users/crud.py), and UserBase.admin defaults to false --
+          # a body carrying only "email" would silently demote the account.
+          update_email() {
+            self_json=$$(curl -fsS -m 15 -H "Authorization: Bearer $$1" "$$MEALIE_API/api/users/self") || return 1
+            case "$$self_json" in
+              *'"email":"'"$$MEALIE_ADMIN_EMAIL"'"'*)
+                return 0
+                ;;
+            esac
+            item_id=$$(printf '%s' "$$self_json" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p')
+            if [ -z "$$item_id" ]; then
+              echo "mealie: could not read the admin's user id - leaving email alone" >&2
+              return 1
+            fi
+            new_json=$$(printf '%s' "$$self_json" | sed 's/"email":"[^"]*"/"email":"'"$$MEALIE_ADMIN_EMAIL"'"/')
+            if curl -fsS -m 15 -o /dev/null -X PUT "$$MEALIE_API/api/users/$$item_id" \
+              -H "Authorization: Bearer $$1" \
+              -H "Content-Type: application/json" \
+              --data-binary "$$new_json"; then
+              echo "mealie: set the admin email to $$MEALIE_ADMIN_EMAIL"
+              return 0
+            fi
+            echo "mealie: could not update the admin email" >&2
+            return 1
+          }
+
+          token=$$(login "$$MEALIE_NEW_PASSWORD")
+          if [ -n "$$token" ]; then
+            echo "mealie: the admin password is already the generated one"
+            update_email "$$token"
+            exit $$?
+          fi
+
+          token=$$(login "$$MEALIE_SEED_PASSWORD")
+          if [ -z "$$token" ]; then
+            echo "mealie: the admin password is neither the upstream default nor the generated one - leaving it alone" >&2
+            exit 0
+          fi
+
+          if curl -fsS -m 15 -o /dev/null -X PUT "$$MEALIE_API/api/users/password" \
+            -H "Authorization: Bearer $$token" \
+            -H "Content-Type: application/json" \
+            --data-binary "{\"currentPassword\":\"$$MEALIE_SEED_PASSWORD\",\"newPassword\":\"$$MEALIE_NEW_PASSWORD\"}"; then
+            echo "mealie: rotated the admin password to the generated one"
+          else
+            echo "mealie: could not rotate the admin password" >&2
+            exit 1
+          fi
+
+          update_email "$$token"
+          exit $$?
+  webui-host: mealie-${domain}

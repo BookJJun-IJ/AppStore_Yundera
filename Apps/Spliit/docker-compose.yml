@@ -1,15 +1,20 @@
 name: spliit
 services:
-  nginxhashlock:
-    image: ghcr.io/yundera/nginx-hash-lock:latest
-    container_name: spliit-nginxhashlock
+  spliit-proxy:
+    image: ghcr.io/yundera/appshield:3.0.2
+    container_name: spliit
+    # OIDC identity: the AppShield auth-service builds its OIDC redirect URIs from
+    # os.hostname(), and the auth-registrar independently attests this app's name via the
+    # container's PTR record, rejecting any redirect URI that doesn't match. Must equal the
+    # app name, or Docker defaults the hostname to the random container ID and OIDC registration fails.
+    hostname: spliit
     restart: unless-stopped
-    user: "root"
     environment:
-      AUTH_HASH: $AUTH_HASH
-      BACKEND_HOST: "spliit"
+      BACKEND_HOST: "spliit-backend"
       BACKEND_PORT: "3000"
       LISTEN_PORT: "80"
+      OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
+      REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
     expose:
       - 80
     labels:
@@ -22,52 +27,65 @@ services:
       caddy_2: spliit-${APP_PUBLIC_IP_DASH}.sslip.io
       caddy_2.reverse_proxy: "{{upstreams 80}}"
     depends_on:
-      - spliit
-      - db
+      spliit-backend:
+        condition: service_started
+      spliit-db:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           memory: 128M
     cpu_shares: 80
     networks:
+      # On `pcs` because Caddy must reach it, and on the app's own network
+      # because that is where its backend and database live.
       - pcs
-    privileged: true
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+      - spliit-internal
 
-  db:
-    image: postgres:16-alpine
+  spliit-db:
+    image: postgres:16.13-alpine
     container_name: spliit-db
     user: 0:0
+    cpu_shares: 50
     environment:
       POSTGRES_DB: spliit
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: $APP_DEFAULT_PASSWORD
       TZ: UTC
     volumes:
-      - /DATA/AppData/$AppID/pgdata/:/var/lib/postgresql/data
+      - ${DATA_ROOT:-/DATA}/AppData/spliit/pgdata/:/var/lib/postgresql/data
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d spliit"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
     networks:
-      - pcs
+      # App-private only. A service named `db` on the shared network would answer
+      # to every other app's `db` lookups — and theirs to ours.
+      - spliit-internal
     deploy:
       resources:
         limits:
           memory: 512M
 
-  spliit:
+  spliit-backend:
     image: ghcr.io/spliit-app/spliit:1.19.0
-    container_name: spliit
+    container_name: spliit-backend
     restart: unless-stopped
+    user: "0:0"
+    cpu_shares: 50
     environment:
       TZ: $TZ
-      POSTGRES_PRISMA_URL: postgresql://postgres:$APP_DEFAULT_PASSWORD@db:5432/spliit
-      POSTGRES_URL_NON_POOLING: postgresql://postgres:$APP_DEFAULT_PASSWORD@db:5432/spliit
+      POSTGRES_PRISMA_URL: postgresql://postgres:$APP_DEFAULT_PASSWORD@spliit-db:5432/spliit
+      POSTGRES_URL_NON_POOLING: postgresql://postgres:$APP_DEFAULT_PASSWORD@spliit-db:5432/spliit
+    depends_on:
+      spliit-db:
+        condition: service_healthy
     networks:
-      - pcs
-    cap_add:
-      - SYS_ADMIN
-      - NET_ADMIN
+      # App-private only: reached solely by spliit-proxy.
+      - spliit-internal
     deploy:
       resources:
         limits:
@@ -75,28 +93,35 @@ services:
 
 networks:
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
+  # App-private link between the proxy, the app and its database.
+  spliit-internal:
+    driver: bridge
 
 x-casaos:
   architectures:
     - amd64
     - arm64
-  main: nginxhashlock
+  main: spliit-proxy
   webui_port: 80
-  author: Yundera Team
   category: Finance
+  tags: ["business", "personal", "productivity"]
   developer: Spliit Team
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Spliit/icon.png
+  icon: icon.png
+  thumbnail: thumbnail.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Spliit/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Spliit/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Spliit/screenshot-3.png
-  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/Spliit/thumbnail.png
-  index: /?hash=$AUTH_HASH  
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
+  index: /
   store_app_id: Spliit
   title:
     en_us: Spliit
+    ko_kr: Spliit
+    zh_cn: Spliit
+    fr_fr: Spliit
+    es_es: Spliit
   tagline:
     en_us: Free and Open Source Expense Sharing App
     ko_kr: 무료 오픈소스 비용 분할 앱
@@ -127,6 +152,9 @@ x-casaos:
   tips:
     before_install:
       en_us: |
+        **Sign-in:** Spliit is protected by your server's single sign-on. Access is
+        handled by that one login - everyone who opens the app, including guests you
+        send a group link to, signs in with their server account (single sign-on).
         -----------------------------
         **How to use:**
         1. Click "Create a group"
@@ -134,9 +162,11 @@ x-casaos:
         3. Add people (just their names)
         4. Start adding expenses
         5. Check "Balances" to see who owes whom
-        -----------------------------        
-        Share the group link with friends - no signup needed!
+        -----------------------------
+        Share the group link with friends - they sign in with their server account to open it.
       ko_kr: |
+        **로그인:** Spliit은 서버 통합 로그인(SSO)으로 보호됩니다. 로그인은 이 하나로 통합되어,
+        공유 링크로 접속하는 사람을 포함해 모든 사용자가 이 서버의 계정으로 로그인합니다.
         -----------------------------
         **사용 방법:**
         1. "그룹 만들기" 클릭
@@ -145,7 +175,10 @@ x-casaos:
         4. 비용 추가 시작
         5. "잔액"을 확인하여 누가 누구에게 빚졌는지 확인
         -----------------------------
+        그룹 링크를 친구와 공유하세요 - 친구는 서버 계정으로 로그인하여 접속합니다.
       zh_cn: |
+        **登录：** Spliit 由您服务器的单点登录（SSO）保护。登录统一由它管理；
+        包括通过共享链接访问的访客在内，所有人都使用本服务器上的账户登录。
         -----------------------------
         **使用方法：**
         1. 点击"创建群组"
@@ -154,7 +187,11 @@ x-casaos:
         4. 开始添加费用
         5. 查看"余额"了解谁欠谁
         -----------------------------
+        与朋友分享群组链接 - 他们使用服务器账户登录即可访问。
       es_es: |
+        **Inicio de sesión:** Spliit está protegido por el inicio de sesión único (SSO) de
+        tu servidor. Ese acceso único lo gestiona todo: todos, incluidos los invitados
+        que abren un enlace compartido, inician sesión con una cuenta de este servidor.
         -----------------------------
         **Cómo usar:**
         1. Haz clic en "Crear un grupo"
@@ -163,7 +200,11 @@ x-casaos:
         4. Empieza a añadir gastos
         5. Revisa "Saldos" para ver quién debe a quién
         -----------------------------
+        Comparte el enlace del grupo con amigos - iniciarán sesión con su cuenta del servidor.
       fr_fr: |
+        **Connexion :** Spliit est protégé par l'authentification unique (SSO) du serveur.
+        Cet identifiant unique gère tous les accès : tout le monde, y compris les
+        invités qui ouvrent un lien partagé, se connecte avec un compte de ce serveur.
         -----------------------------
         **Comment utiliser:**
         1. Cliquez sur "Créer un groupe"
@@ -172,3 +213,15 @@ x-casaos:
         4. Commencez à ajouter des dépenses
         5. Vérifiez "Soldes" pour voir qui doit à qui
         -----------------------------
+        Partagez le lien du groupe avec vos amis - ils se connectent avec leur compte du serveur.
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/spliit/pgdata
+      user: $PUID
+      group: $PGID
+  webui-host: spliit-${domain}
+  webui-path: "/"

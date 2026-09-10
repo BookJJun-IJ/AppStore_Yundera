@@ -2,7 +2,7 @@ name: claude
 
 services:
   claude:
-    image: ghcr.io/worph/claude-code-container:1.0.23
+    image: ghcr.io/worph/claude-code-container:1.0.26
     container_name: claude
     restart: unless-stopped
     user: 0:0
@@ -17,9 +17,11 @@ services:
       caddy_0.0_handle.reverse_proxy: "{{upstreams 9090}}"
       caddy_0.1_handle: "/logout"
       caddy_0.1_handle.reverse_proxy: "{{upstreams 9090}}"
-      # /mcp — no forward_auth, MCP server has its own Bearer auth
-      caddy_0.2_handle_path: "/mcp*"
-      caddy_0.2_handle_path.reverse_proxy: "{{upstreams 9090}}"
+      # /mcp — no forward_auth, MCP server has its own Bearer auth.
+      # MCP automation itself is disabled via MCP_ENABLED=false below; with that
+      # set, the 9090 server returns 404 for /mcp (auth/login still served).
+      caddy_0.2_handle: "/mcp*"
+      caddy_0.2_handle.reverse_proxy: "{{upstreams 9090}}"
       # Everything else — forward_auth via MCP, then proxy to ttyd
       caddy_0.3_handle: ""
       caddy_0.3_handle.forward_auth: "{{upstreams 9090}}"
@@ -35,8 +37,8 @@ services:
       caddy_1.0_handle.reverse_proxy: "{{upstreams 9090}}"
       caddy_1.1_handle: "/logout"
       caddy_1.1_handle.reverse_proxy: "{{upstreams 9090}}"
-      caddy_1.2_handle_path: "/mcp*"
-      caddy_1.2_handle_path.reverse_proxy: "{{upstreams 9090}}"
+      caddy_1.2_handle: "/mcp*"
+      caddy_1.2_handle.reverse_proxy: "{{upstreams 9090}}"
       caddy_1.3_handle: ""
       caddy_1.3_handle.forward_auth: "{{upstreams 9090}}"
       caddy_1.3_handle.forward_auth.uri: /auth
@@ -50,8 +52,8 @@ services:
       caddy_2.0_handle.reverse_proxy: "{{upstreams 9090}}"
       caddy_2.1_handle: "/logout"
       caddy_2.1_handle.reverse_proxy: "{{upstreams 9090}}"
-      caddy_2.2_handle_path: "/mcp*"
-      caddy_2.2_handle_path.reverse_proxy: "{{upstreams 9090}}"
+      caddy_2.2_handle: "/mcp*"
+      caddy_2.2_handle.reverse_proxy: "{{upstreams 9090}}"
       caddy_2.3_handle: ""
       caddy_2.3_handle.forward_auth: "{{upstreams 9090}}"
       caddy_2.3_handle.forward_auth.uri: /auth
@@ -61,30 +63,31 @@ services:
       caddy_2.3_handle.reverse_proxy: "{{upstreams 8080}}"
     environment:
       - AUTH_PASSWORD=$APP_DEFAULT_PASSWORD
+      # MCP automation disabled. With MCP_ENABLED=true the image also starts a UDP
+      # discovery responder (mcp-announce.js: binds 0.0.0.0:9099, joins multicast
+      # 239.255.99.1) that replies to ANY unauthenticated datagram with a manifest
+      # carrying auth:{type:bearer,token:$AUTH_PASSWORD} — i.e. it hands
+      # $APP_DEFAULT_PASSWORD, which is both the /mcp bearer token and the terminal
+      # login password, to every other container on the shared pcs network. The image
+      # offers no way to keep /mcp while suppressing that announcement, so MCP stays
+      # off until that is fixed upstream. See rationale.md.
+      # The 9090 auth layer (login/auth/logout) keeps running; only /mcp is turned off.
+      - MCP_ENABLED=false
+    # SANDBOXED variant: NO docker.sock, NO host /home/admin/.ssh mount, and NO
+    # full /DATA mount. This container has no path to the host VM — it is
+    # confined to its own workspace.
     volumes:
-      # Docker socket for container management
-      - type: bind
-        source: /var/run/docker.sock
-        target: /var/run/docker.sock
-      # SSH keys for root access to host VM (used for system maintenance)
-      - type: bind
-        source: /root/.ssh/
-        target: /host_ssh/
-      # Used for PCS integration
-      - type: bind
-        source: /DATA/
-        target: /DATA/
       # Claude Code workspace persistence
       - type: bind
-        source: /DATA/AppData/claude/workspace/
+        source: ${DATA_ROOT:-/DATA}/AppData/claude/workspace/
         target: /home/claude/workspace
       # Claude config persistence (contains credentials, settings, and other important data)
       - type: bind
-        source: /DATA/AppData/claude/config/
+        source: ${DATA_ROOT:-/DATA}/AppData/claude/config/
         target: /home/claude/.claude
       # Claude session state file (required for auth persistence across restarts)
       - type: bind
-        source: /DATA/AppData/claude/config/.claude.json
+        source: ${DATA_ROOT:-/DATA}/AppData/claude/config/.claude.json
         target: /home/claude/.claude.json
     networks:
       pcs: null
@@ -96,7 +99,7 @@ services:
 
 networks:
   pcs:
-    name: pcs
+    name: ${APP_NET:-pcs}
     external: true
 
 x-casaos:
@@ -106,39 +109,38 @@ x-casaos:
     - amd64
     - arm64
   main: claude
-  author: Yundera
   category: Developer
+  tags: ["developer", "ai"]
   description:
     en_us: |
       Claude Code Container - Web-based terminal interface for Claude Code (Anthropic's CLI for Claude).
+
+      This is the standard, sandboxed Claude Code app. It runs confined to its own workspace with NO Docker socket, NO host SSH access, and NO sudo account — it cannot touch the host VM. If you need full PCS administration and debugging with host control, install "Claude Code (root)" instead.
 
       Features:
       - Web-based terminal access to Claude Code
       - Styled login page with session management
       - Persistent workspace volume
       - Claude starts automatically on connection
-      - Full administrative power: Docker socket access + SSH root access to host VM
-      - Can perform any maintenance task on the VM
+      - No host access — runs fully sandboxed
 
       Default password is auto-generated. Check the app settings for the AUTH_PASSWORD value.
     zh_cn: |
       Claude Code 容器 - Claude Code（Anthropic 的 Claude CLI）的 Web 终端界面。
 
-      功能：
-      - 基于 Web 的 Claude Code 终端访问
-      - 带会话管理的登录页面
-      - 持久化工作区
-      - 连接时自动启动 Claude
-  developer: Anthropic / Yundera
-  icon: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/icon.png
+      这是标准的沙盒版 Claude Code 应用，仅限于自己的工作区运行：没有 Docker 套接字、没有主机 SSH 访问、也没有 sudo 账户，无法触及主机虚拟机。如需对 PCS 进行管理和调试（具备主机控制权），请改装 “Claude Code (root)”。
+
+      注意：本版本已禁用 MCP 自动化端点。
+  developer: Anthropic
+  icon: icon.png
   screenshot_link:
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/screenshot-1.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/screenshot-2.png
-    - https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/screenshot-3.png
+    - screenshot-1.png
+    - screenshot-2.png
+    - screenshot-3.png
   tagline:
-    en_us: Web terminal for Claude Code - Anthropic's AI coding assistant
-    zh_cn: Claude Code 的 Web 终端 - Anthropic 的 AI 编程助手
-  thumbnail: https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/thumbnail.png
+    en_us: Web terminal for Claude Code - Anthropic's AI coding assistant (sandboxed)
+    zh_cn: Claude Code 的 Web 终端 - Anthropic 的 AI 编程助手（沙盒化）
+  thumbnail: thumbnail.png
   title:
     en_us: Claude Code
     zh_cn: Claude Code
@@ -153,52 +155,20 @@ x-casaos:
 
         Default login password: `$APP_DEFAULT_PASSWORD`
 
-        **MCP Integration (for AI/LLMs):**
+        **Sandboxed variant:** This app has no Docker socket, no host SSH, and no sudo account. It cannot perform host maintenance — use "Claude Code (root)" for that.
 
-        Claude Code includes a Model Context Protocol (MCP) server that allows other AI assistants to send prompts and interact with this instance programmatically.
+        **MCP automation is turned off in this listing** (`MCP_ENABLED=false`), so `/mcp` answers 404 and there is no endpoint for another AI assistant (n8n, an aggregator) to drive. The image's MCP mode also starts a UDP discovery responder that hands this app's login password — the same `$APP_DEFAULT_PASSWORD` other apps on the server use — to any container that asks for it on the shared Docker network, and the image gives no way to keep one without the other. See `rationale.md`.
 
-        **Option 1: Public URL (with Bearer auth)**
-        ```json
-        {
-          "mcpServers": {
-            "claude-code": {
-              "type": "http",
-              "url": "https://claude-${APP_DOMAIN}/mcp",
-              "headers": {
-                "Authorization": "Bearer ${AUTH_PASSWORD}"
-              }
-            }
-          }
-        }
-        ```
-
-        **Option 2: Local Docker connection**
-
-        For AI assistants running on the same server, connect directly via the Docker network:
-        ```json
-        {
-          "mcpServers": {
-            "claude-code": {
-              "type": "http",
-              "url": "http://claude:9090/mcp",
-              "headers": {
-                "Authorization": "Bearer ${AUTH_PASSWORD}"
-              }
-            }
-          }
-        }
-        ```
-        *Note: Requires the AI assistant to be on the `pcs` Docker network.*
-
-        **Available MCP Tools:**
-        | Tool | Description |
-        |------|-------------|
-        | `query_claude` | Send a prompt and get a response |
-        | `check_status` | Check if Claude is available |
-  pre-install-cmd: |
-    mkdir -p /DATA/AppData/claude/workspace /DATA/AppData/claude/config &&
-    touch /DATA/AppData/claude/config/.claude.json &&
-    if [ ! -f /DATA/AppData/claude/workspace/CLAUDE.md ]; then
-      wget -q https://cdn.jsdelivr.net/gh/Yundera/AppStore@main/Apps/ClaudeCode/pre-install/CLAUDE.md -O /DATA/AppData/claude/workspace/CLAUDE.md
-    fi &&
-    chown -R 1000:1000 /DATA/AppData/claude
+x-compose-app:
+  schema_version: 2
+  # Directories Maison creates and chowns to $PUID:$PGID before every `up`.
+  # Generated by scripts/gen-folders.py from the trailing-slash bind mounts
+  # in `volumes:` above — re-run it instead of editing this block by hand.
+  folders:
+    - path: /DATA/AppData/claude/workspace
+      user: $PUID
+      group: $PGID
+    - path: /DATA/AppData/claude/config
+      user: $PUID
+      group: $PGID
+  webui-host: claude-${domain}
