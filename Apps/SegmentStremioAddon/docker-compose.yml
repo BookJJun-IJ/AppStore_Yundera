@@ -32,7 +32,7 @@ services:
       # instead by the addon's own API key, embedded in the manifest URL path. This is a
       # documented deviation from the "use OAUTH_RESOURCE, not ALLOWED_PATHS" rule - see
       # rationale.md. The setup page at / stays behind the OIDC gate.
-      ALLOWED_PATHS: "/api/"
+      ALLOWED_PATHS: "/api/,/favicon.ico"
       OIDC_REGISTRAR_URL: "http://auth-registrar:9092"
       REDIRECT_HOST_SUFFIXES: "${APP_DOMAIN},${APP_PUBLIC_IP_DASH}.nip.io,${APP_PUBLIC_IP_DASH}.sslip.io"
     depends_on:
